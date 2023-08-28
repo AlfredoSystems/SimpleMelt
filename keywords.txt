@@ -1,0 +1,33 @@
+#######################################
+# Syntax Coloring Map - Alfredo_NoU
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+SimpleMelt KEYWORD1
+Button KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+meltyStateUpdate KEYWORD2
+arcadeStateUpdate KEYWORD2
+stopStateUpdate KEYWORD2
+disconnectedStateUpdate KEYWORD2
+
+is_held() KEYWORD2
+just_released KEYWORD2
+just_pressed KEYWORD2
+update KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+NO_CONNECTION LITERAL1
+STOP LITERAL1
+ARCADE LITERAL1
+MELTY LITERAL1
