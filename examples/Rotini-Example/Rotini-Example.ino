@@ -14,18 +14,20 @@ const int PIN_ACCELEROMETER_CS = 11;
 const int PIN_ACCELEROMETER_INT = 12;
 const int PIN_MAGNETOMETER_CS = 2;
 const int PIN_MAGNETOMETER_INT = 13;
-const int PIN_ELRS_UART_RX = 7;
-const int PIN_ELRS_UART_TX = 8;
+const int PIN_CRSF_RX = 7;
+const int PIN_CRSF_TX = 8;
 const int PIN_MOTOR_FOO = 34;
 const int PIN_MOTOR_BAR = 35;
 const int PIN_MELTY_LED = 42;
 const int PIN_STATUS_LED = 41;
 const int PIN_SNS_VIN = 3;
 
+const float GOOD_POWER = 0.18;
+
 SimpleMelt Rotini;
 
 HardwareSerial crsfSerial(1);
-ArduinoCRSF elrs;
+ArduinoCRSF crsf;
 
 LIS331 accelerometer;
 
@@ -46,13 +48,14 @@ void setup() {
     digitalWrite(PIN_ACCELEROMETER_CS, HIGH); // Make CS high
     digitalWrite(PIN_MAGNETOMETER_CS, HIGH); // Make CS high
     
-    crsfSerial.begin(CRSF_BAUDRATE, SERIAL_8N1, PIN_ELRS_UART_RX, PIN_ELRS_UART_TX);
+    crsfSerial.begin(CRSF_BAUDRATE, SERIAL_8N1, PIN_CRSF_RX, PIN_CRSF_TX);
     if (!crsfSerial) while (1) Serial.println("Invalid crsfSerial configuration");
     crsf.begin(crsfSerial);
     
     SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
 
     accelerometer.setSPICSPin(PIN_ACCELEROMETER_CS);
+    //while (!accel.begin(ACCEL_CS_PIN)) delay(500);
     accelerometer.begin(LIS331::USE_SPI); // Selects the bus to be used and sets
     accelerometer.setODR(accelerometer.DR_1000HZ);
     accelerometer.setFullScale(accelerometer.HIGH_RANGE);
@@ -72,29 +75,29 @@ void loop() {
         Rotini.drive_mode = NO_CONNECTION;
     }
 
-   Rotini.axis_left_x = channel_to_axis(4));
-   Rotini.axis_left_y = channel_to_axis(3));
-   Rotini.axis_right_x = channel_to_axis(1));
-   Rotini.axis_right_y = channel_to_axis(2));
+   Rotini.axis_left_x = channel_to_axis(4);
+   Rotini.axis_left_y = channel_to_axis(3);
+   Rotini.axis_right_x = channel_to_axis(1);
+   Rotini.axis_right_y = channel_to_axis(2);
    
-   Rotini.left_bumper.update(elrs.get_channel(11));
-   Rotini.right_bumper.update(elrs.get_channel(11));
+   Rotini.left_bumper.update(crsf.getChannel(11));
+   Rotini.right_bumper.update(crsf.getChannel(11));
    
-   Rotini.left_left_arrow.update(elrs.get_channel(10));
-   Rotini.left_right_arrow.update(elrs.get_channel(10));
-   Rotini.left_up_arrow.update(elrs.get_channel(9));
-   Rotini.left_down_arrow.update(elrs.get_channel(9));
-   Rotini.right_left_arrow.update(elrs.get_channel(7));
-   Rotini.right_right_arrow.update(elrs.get_channel(7));
-   Rotini.right_up_arrow.update(elrs.get_channel(8));
-   Rotini.right_down_arrow.update(elrs.get_channel(8));
+   Rotini.left_left_arrow.update(crsf.getChannel(10));
+   Rotini.left_right_arrow.update(crsf.getChannel(10));
+   Rotini.left_up_arrow.update(crsf.getChannel(9));
+   Rotini.left_down_arrow.update(crsf.getChannel(9));
+   Rotini.right_left_arrow.update(crsf.getChannel(7));
+   Rotini.right_right_arrow.update(crsf.getChannel(7));
+   Rotini.right_up_arrow.update(crsf.getChannel(8));
+   Rotini.right_down_arrow.update(crsf.getChannel(8));
    // SWA
-   Rotini.front_left_switch_backward.update(elrs.get_channel(6));
-   Rotini.front_left_switch_neutral.update(elrs.get_channel(6));
-   Rotini.front_left_switch_forward.update(elrs.get_channel(6));
+   Rotini.front_left_switch_backward.update(crsf.getChannel(6));
+   Rotini.front_left_switch_neutral.update(crsf.getChannel(6));
+   Rotini.front_left_switch_forward.update(crsf.getChannel(6));
    // SWD
-   Rotini.back_right_switch_backward.update(elrs.get_channel(11));
-   Rotini.back_right_switch_forward.update(elrs.get_channel(11));
+   Rotini.back_right_switch_backward.update(crsf.getChannel(11));
+   Rotini.back_right_switch_forward.update(crsf.getChannel(11));
    
    if (Rotini.drive_mode == MELTY) {
       int16_t x, y, z;
@@ -103,23 +106,22 @@ void loop() {
       Rotini.accelerometer_y = accelerometer.convertToG(6,y); // accepts as parameters the
       Rotini.accelerometer_z = accelerometer.convertToG(6,z); // raw value and the current
     
-      if (Rotini.right_bumper.just_pressed()) this->spin_power += 0.02;
-      if (Rotini.left_bumper.just_pressed()) this->spin_power -= 0.02;
-      this->spin_power = constrain(this->spin_power, 0, 1);
+      if (Rotini.right_bumper.just_pressed()) Rotini.spin_power += 0.02;
+      if (Rotini.left_bumper.just_pressed()) Rotini.spin_power -= 0.02;
+      Rotini.spin_power = fconstrain(Rotini.spin_power, 0, 1);
 
-      if (Rotini.left_up_arrow.is_held()) this->spin_power = 0;
-      else if (Rotini.right_left_arrow.is_held()) this->spin_power = GOOD_POWER;
-      else if (Rotini.right_right_arrow.is_held()) this->spin_power = 1;
+      if (Rotini.left_up_arrow.is_held()) Rotini.spin_power = 0;
+      else if (Rotini.right_left_arrow.is_held()) Rotini.spin_power = GOOD_POWER;
+      else if (Rotini.right_right_arrow.is_held()) Rotini.spin_power = 1;
+      
+      if (Rotini.right_right_arrow.just_released()) Rotini.spin_power = GOOD_POWER;
 
-      if (Rotini.back_right_switch_backward.is_held()) this->reversed = false;
-      else if (Rotini.back_right_switch_forward.is_held()) this->reversed = true;
+      if (Rotini.back_right_switch_backward.is_held()) Rotini.reversed = false;
+      else if (Rotini.back_right_switch_forward.is_held()) Rotini.reversed = true;
 
-      // TODO: Reset to pre-attack spin_power instead of good spin_power?
-      if (Rotini.right_right_arrow.just_released()) this->spin_power = GOOD_POWER;
-
-      if (Rotini.left_left_arrow.just_pressed()) this->radius_trim += 0.001;
-      else if (Rotini.left_right_arrow.just_pressed()) this->radius_trim -= 0.001;
-      else if (Rotini.left_up_arrow.is_held()) this->radius_trim = 0;
+      if (Rotini.left_left_arrow.just_pressed()) Rotini.radius_trim += 0.001;
+      else if (Rotini.left_right_arrow.just_pressed()) Rotini.radius_trim -= 0.001;
+      else if (Rotini.left_up_arrow.is_held()) Rotini.radius_trim = 0;
       
       
       Rotini.meltyStateUpdate();
@@ -151,10 +153,10 @@ void loop() {
  ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-float lerp(float val, float in_min, float in_max, float out_min, float out_max) { return (val - in_min) * (out_max - out_min) / (in_max - in_min) + out_min; };
-float constrain(float x, float min, float max) { return x > max ? max : (x < min ? min : x); };
-float magnitude(float x, float y) { return sqrt(x * x + y * y); };
-float modulo(float x, float n) { return x - floor(x / n) * n; }; // Mathematical modulo
+// float lerp(float val, float in_min, float in_max, float out_min, float out_max) { return (val - in_min) * (out_max - out_min) / (in_max - in_min) + out_min; }
+// float fconstrain(float x, float min, float max) { return x > max ? max : (x < min ? min : x); }
+// float magnitude(float x, float y) { return sqrt(x * x + y * y); }
+// float modulo(float x, float n) { return x - floor(x / n) * n; } // Mathematical modulo
 
 
 
@@ -173,7 +175,7 @@ float channel_to_axis(unsigned int channel) {
 
 
 
-// void ELRS::send_diagnostics(Rotini* RotiniPtr) {
+// void(crsf::send_diagnostics(Rotini* RotiniPtr) {
     // crsf_sensor_battery_t battery_data = {
         // .voltage = htobe16((uint16_t)(RotiniPtr->voltage * 10)),
     // };

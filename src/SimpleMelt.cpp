@@ -1,16 +1,16 @@
-#include "SimpleMelt.h"
+#include <Arduino.h>
 #include <math.h>
+#include "SimpleMelt.h"
 
-float lerp(float val, float in_min, float in_max, float out_min, float out_max) { return (val - in_min) * (out_max - out_min) / (in_max - in_min) + out_min; };
-float constrain(float x, float min, float max) { return x > max ? max : (x < min ? min : x); };
-float magnitude(float x, float y) { return sqrt(x * x + y * y); };
-float modulo(float x, float n) { return x - floor(x / n) * n; }; // Mathematical modulo
-
+float lerp(float val, float in_min, float in_max, float out_min, float out_max) { return (val - in_min) * (out_max - out_min) / (in_max - in_min) + out_min; }
+float fconstrain(float x, float min, float max) { return x > max ? max : (x < min ? min : x); }
+float magnitude(float x, float y) { return sqrt(x * x + y * y); }
+float modulo(float x, float n) { return x - floor(x / n) * n; } // Mathematical modulo
 
 void SimpleMelt::meltyStateUpdate() {
 
    float stick_angle = atan2(axis_left_y, 0); // No omnidirectional movement
-   float stick_magnitude = constrain(magnitude(0, axis_left_y, 0, 1);
+   float stick_magnitude = fconstrain(magnitude(0, axis_left_y), 0, 1);
 
    // TODO: This is the reverse of what expect. Is that cause I'm applying it to the stick instead of robot angle?
    // Motor acceleration lag causes the robot to move too far past forward. Shift the angle back to compensate.
@@ -26,16 +26,16 @@ void SimpleMelt::meltyStateUpdate() {
    previous_melty_frame_us = micros();
    if (time_step > 500000) time_step = 0; // Just switched to melty mode, bad frame
 
-   float cen_accel = magnitude(acceleration_x, acceleration_y);
+   float cen_accel = magnitude(accelerometer_x, accelerometer_y);
    float angular_vel = (reversed ? -1 : 1) * sqrt(fabs(cen_accel / (ACCELEROMETER_RADIUS + radius_trim)));
 
    // Trapezoidal Riemann sum to calculate change in angle
-   float delta_angle = (angular_vel + prev_ang_vel) * 0.5 * time_step * 0.000001;
+   float delta_angle = (angular_vel + previous_ang_vel) * 0.5 * time_step * 0.000001;
    angle = fmod(angle + delta_angle, M_TWOPI);
    previous_ang_vel = angular_vel;
 
    // Positive (pushed right) stick gives negative clockwise heading rotation
-   angle -= gamepad->get_right_x() * M_TWOPI * TURN_SPEED * time_step * 0.000001;
+   angle -= axis_right_x * M_TWOPI * TURN_SPEED * time_step * 0.000001;
 
    // Angle from the robot's angle to the joystick's angle, from [-PI, PI)
    float angle_diff = modulo((stick_angle - angle) + M_PI, M_TWOPI) - M_PI;
