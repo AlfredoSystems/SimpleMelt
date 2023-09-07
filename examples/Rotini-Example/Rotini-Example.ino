@@ -38,11 +38,12 @@ void setup() {
   //radius trim still needs: CW-16L, CCW-16L
   //motor_lag_angle still needs: CW-9L, CCW-6R
   //get mag data
-  Rotini.melty_led_offset = 0.698132; // radians (CCW is positive)
-  Rotini.turn_speed = 1.1; // radians per second
-  Rotini.motor_lag_angle = -2.35619; // radians
+  Rotini.melty_led_offset_CW = 0.698132 + 0.09*9.0; // radians (CCW is positive)
+  Rotini.melty_led_offset_CCW = 0.698132 - 0.09*6.0; // radians (CCW is positive)
+  Rotini.turn_speed = 1.1; // rotations per second
+  //Rotini.motor_lag_angle = -2.35619; // radians
   Rotini.accelerometer_radius = 0.090; // meters
-  Rotini.radius_trim = 0.032; // meters
+  Rotini.radius_trim = 0.002*16.0; // meters
 
   pinMode(PIN_STATUS_LED, OUTPUT);
   pinMode(PIN_MELTY_LED, OUTPUT);
@@ -146,23 +147,19 @@ void loop() {
         Rotini.radius_trim = 0;
     } else if(SWB_neutral.is_held()) { //middle pos trims led offset
       if (left_left_arrow.just_pressed())
-        Rotini.melty_led_offset += 0.09; //about 5 degrees
+        Rotini.melty_led_offset_CW += 0.09; //about 5 degrees
       else if (left_right_arrow.just_pressed())
-        Rotini.melty_led_offset -= 0.09; //about 5 degrees
+        Rotini.melty_led_offset_CW -= 0.09; //about 5 degrees
       else if (left_up_arrow.is_held())
-        Rotini.melty_led_offset = 0.698132;
+        Rotini.melty_led_offset_CW = 0.698132 + 0.09*9.0;
     } else if(SWB_forward.is_held()) { //up pos trims lag angle
       if (left_left_arrow.just_pressed())
-        Rotini.motor_lag_angle += 0.09; //about 5 degrees
+        Rotini.melty_led_offset_CCW += 0.09; //about 5 degrees
       else if (left_right_arrow.just_pressed())
-        Rotini.motor_lag_angle -= 0.09; //about 5 degrees
+        Rotini.melty_led_offset_CCW -= 0.09; //about 5 degrees
       else if (left_up_arrow.is_held())
-        Rotini.motor_lag_angle = -2.35619;
+        Rotini.melty_led_offset_CCW = 0.698132 - 0.09*6.0;
     }
-    // Serial.print(crsf.getChannel(12));  Serial.print(" ");
-    // Serial.print(Rotini.radius_trim);  Serial.print(" ");
-    // Serial.print(Rotini.melty_led_offset);  Serial.print(" ");
-    // Serial.print(Rotini.motor_lag_angle);  Serial.println(" ");
 
     Rotini.meltyStateUpdate();
 

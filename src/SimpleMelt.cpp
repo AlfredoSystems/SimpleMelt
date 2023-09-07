@@ -9,9 +9,8 @@ void SimpleMelt::meltyStateUpdate() {
    float stick_angle = atan2(throttle, 0); // No omnidirectional movement
    float stick_magnitude = fconstrain(magnitude(0, throttle), 0, 1);
    spin_power = fconstrain(spin_power, 0, 1);
-
-   stick_angle += motor_lag_angle * (reversed ? -1 : 1);
-   //stick_angle *= motor_lag_angle * (reversed ? -1 : 1);
+   
+   //stick_angle += motor_lag_angle * (reversed ? -1 : 1);
 
    uint64_t time_step;
    if (micros() < previous_melty_frame_us) time_step = 0;
@@ -34,9 +33,10 @@ void SimpleMelt::meltyStateUpdate() {
    float angle_diff = modulo((stick_angle - angle) + M_PI, M_TWOPI) - M_PI;
 
    // Draw arc
+   float melty_led_offset = (!reversed) ? melty_led_offset_CW : melty_led_offset_CCW;
    float melty_led_angle = modulo(angle - melty_led_offset, M_TWOPI);
    melty_led = M_PI_4 < melty_led_angle && melty_led_angle < M_3PI_4;
-
+   
    // Set motor speed
    float deflection = spin_power * lerp(stick_magnitude, 0, 1, 0, 0.5);
    if (angle_diff < 0) {

@@ -16,8 +16,9 @@ class SimpleMelt {
       void stopStateUpdate();
       void disconnectedStateUpdate();
       
-      float melty_led_offset = 0; // radians (CCW is positive)
-      float turn_speed = 1; // radians per second
+      float melty_led_offset_CW = 0; // radians (CCW is positive)
+      float melty_led_offset_CCW = 0; // radians (CCW is positive)
+      float turn_speed = 1; // rotations per second
       float motor_lag_angle = 0; // radians
       float accelerometer_radius = 0.1; // meters
       float radius_trim = 0; //meters
