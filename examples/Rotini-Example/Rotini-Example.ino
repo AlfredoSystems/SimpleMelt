@@ -34,16 +34,12 @@ ESC foo;
 ESC bar;
 
 void setup() {
-  //get rid of motor lag angle??????????
-  //radius trim still needs: CW-16L, CCW-16L
-  //motor_lag_angle still needs: CW-9L, CCW-6R
   //get mag data
-  Rotini.melty_led_offset_CW = 0.698132 + 0.09*9.0; // radians (CCW is positive)
-  Rotini.melty_led_offset_CCW = 0.698132 - 0.09*6.0; // radians (CCW is positive)
-  Rotini.turn_speed = 1.1; // rotations per second
-  //Rotini.motor_lag_angle = -2.35619; // radians
-  Rotini.accelerometer_radius = 0.090; // meters
-  Rotini.radius_trim = 0.002*16.0; // meters
+  Rotini.melty_led_offset_CW = 1.5;     // radians (CCW is positive)
+  Rotini.melty_led_offset_CCW = 3.3;    // radians (CCW is positive)
+  Rotini.turn_speed = 1.1;              // rotations per second
+  Rotini.accelerometer_radius = 0.090;  // meters
+  Rotini.radius_trim = 0.032;           // meters
 
   pinMode(PIN_STATUS_LED, OUTPUT);
   pinMode(PIN_MELTY_LED, OUTPUT);
@@ -63,9 +59,9 @@ void setup() {
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
 
   accelerometer.setSPICSPin(PIN_ACCELEROMETER_CS);
-  accelerometer.begin(LIS331::USE_SPI);  // Selects the bus to be used and sets
+  accelerometer.begin(LIS331::USE_SPI);  // Selects the bus to be used
   accelerometer.setODR(accelerometer.DR_1000HZ);
-  accelerometer.setFullScale(accelerometer.HIGH_RANGE); //400g range
+  accelerometer.setFullScale(accelerometer.HIGH_RANGE);  //400g range
 
   foo.begin(PIN_MOTOR_FOO, 0);
   bar.begin(PIN_MOTOR_BAR, 1);
@@ -74,38 +70,56 @@ void setup() {
 }
 
 void loop() {
-  
+
   crsf.update();
 
-  Rotini.rotation = channel_to_axis(1); //axis_right_x
-  Rotini.throttle = channel_to_axis(3); //axis_left_y
+  Rotini.rotation = channel_to_axis(1);  //axis_right_x
+  Rotini.throttle = channel_to_axis(3);  //axis_left_y
   //axis_right_y = channel_to_axis(2);
   //axis_left_x = channel_to_axis(4);
 
   //bumpers
-  static Button left_bumper; left_bumper.update(crsf.getChannel(11), 1000);
-  static Button right_bumper; right_bumper.update(crsf.getChannel(11), 2000);
+  static Button left_bumper;
+  left_bumper.update(crsf.getChannel(11), 1000);
+  static Button right_bumper;
+  right_bumper.update(crsf.getChannel(11), 2000);
   //trim buttons
-  static Button left_left_arrow; left_left_arrow.update(crsf.getChannel(10), 1000);
-  static Button left_right_arrow; left_right_arrow.update(crsf.getChannel(10), 2000);
-  static Button left_up_arrow; left_up_arrow.update(crsf.getChannel(9), 2000);
-  static Button left_down_arrow; left_down_arrow.update(crsf.getChannel(9), 1000);
-  static Button right_left_arrow; right_left_arrow.update(crsf.getChannel(7), 1000);
-  static Button right_right_arrow; right_right_arrow.update(crsf.getChannel(7), 2000);
-  static Button right_up_arrow; right_up_arrow.update(crsf.getChannel(8), 2000);
-  static Button right_down_arrow; right_down_arrow.update(crsf.getChannel(8), 1000);
+  static Button left_left_arrow;
+  left_left_arrow.update(crsf.getChannel(10), 1000);
+  static Button left_right_arrow;
+  left_right_arrow.update(crsf.getChannel(10), 2000);
+  static Button left_up_arrow;
+  left_up_arrow.update(crsf.getChannel(9), 2000);
+  static Button left_down_arrow;
+  left_down_arrow.update(crsf.getChannel(9), 1000);
+  static Button right_left_arrow;
+  right_left_arrow.update(crsf.getChannel(7), 1000);
+  static Button right_right_arrow;
+  right_right_arrow.update(crsf.getChannel(7), 2000);
+  static Button right_up_arrow;
+  right_up_arrow.update(crsf.getChannel(8), 2000);
+  static Button right_down_arrow;
+  right_down_arrow.update(crsf.getChannel(8), 1000);
   // SWA - Zorro Switch B
-  static Button SWA_backward; SWA_backward.update(crsf.getChannel(6), 1000);
-  static Button SWA_neutral; SWA_neutral.update(crsf.getChannel(6), 1500);
-  static Button SWA_forward; SWA_forward.update(crsf.getChannel(6), 2000);
+  static Button SWA_backward;
+  SWA_backward.update(crsf.getChannel(6), 1000);
+  static Button SWA_neutral;
+  SWA_neutral.update(crsf.getChannel(6), 1500);
+  static Button SWA_forward;
+  SWA_forward.update(crsf.getChannel(6), 2000);
   // SWD - Zorro Switch F
-  static Button SWD_backward; SWD_backward.update(crsf.getChannel(5), 1000);
-  static Button SWD_forward; SWD_forward.update(crsf.getChannel(5), 2000);
+  static Button SWD_backward;
+  SWD_backward.update(crsf.getChannel(5), 1000);
+  static Button SWD_forward;
+  SWD_forward.update(crsf.getChannel(5), 2000);
   // SWB - Zorro Switch C
-  static Button SWB_backward; SWB_backward.update(crsf.getChannel(12), 1000);
-  static Button SWB_neutral; SWB_neutral.update(crsf.getChannel(12), 1500);
-  static Button SWB_forward; SWB_forward.update(crsf.getChannel(12), 2000);
-  
+  static Button SWB_backward;
+  SWB_backward.update(crsf.getChannel(12), 1000);
+  static Button SWB_neutral;
+  SWB_neutral.update(crsf.getChannel(12), 1500);
+  static Button SWB_forward;
+  SWB_forward.update(crsf.getChannel(12), 2000);
+
   if (crsf.isLinkUp()) {
     if (SWA_backward.is_held()) Rotini.drive_mode = STOP;
     else if (SWA_neutral.is_held()) Rotini.drive_mode = ARCADE;
@@ -117,8 +131,8 @@ void loop() {
   if (Rotini.drive_mode == MELTY) {
     int16_t x, y, z;
     accelerometer.readAxes(x, y, z);
-    Rotini.accelerometer_x = 0; //LIS331_to_mps2(x);
-    Rotini.accelerometer_y = 0; //LIS331_to_mps2(y);
+    Rotini.accelerometer_x = 0;  //LIS331_to_mps2(x);
+    Rotini.accelerometer_y = 0;  //LIS331_to_mps2(y);
     Rotini.accelerometer_z = LIS331_to_mps2(z);
 
     if (right_bumper.just_pressed())
@@ -130,35 +144,35 @@ void loop() {
       Rotini.spin_power = 0;
     else if (right_right_arrow.is_held())
       Rotini.spin_power = 1;
-    else if (right_left_arrow.is_held() || right_right_arrow.just_released()) 
-      Rotini.spin_power = 0.18; //this is "cruising power"
+    else if (right_left_arrow.is_held() || right_right_arrow.just_released())
+      Rotini.spin_power = 0.18;  //this is "cruising power"
 
     if (SWD_backward.is_held())
       Rotini.reversed = false;
     else if (SWD_forward.is_held())
       Rotini.reversed = true;
 
-    if(SWB_backward.is_held()){  //default down trims accel radius
+    if (SWB_backward.is_held()) {  //default down trims accel radius
       if (left_left_arrow.just_pressed())
-        Rotini.radius_trim += 0.002;
+        Rotini.radius_trim += 0.002;  // 2 mm
       else if (left_right_arrow.just_pressed())
-        Rotini.radius_trim -= 0.002;
+        Rotini.radius_trim -= 0.002;  // 2 mm
       else if (left_up_arrow.is_held())
         Rotini.radius_trim = 0;
-    } else if(SWB_neutral.is_held()) { //middle pos trims led offset
+    } else if (SWB_neutral.is_held()) {  //middle pos trims led offset
       if (left_left_arrow.just_pressed())
-        Rotini.melty_led_offset_CW += 0.09; //about 5 degrees
+        Rotini.melty_led_offset_CW += 0.1;  //about 5 degrees
       else if (left_right_arrow.just_pressed())
-        Rotini.melty_led_offset_CW -= 0.09; //about 5 degrees
+        Rotini.melty_led_offset_CW -= 0.1;  //about 5 degrees
       else if (left_up_arrow.is_held())
-        Rotini.melty_led_offset_CW = 0.698132 + 0.09*9.0;
-    } else if(SWB_forward.is_held()) { //up pos trims lag angle
+        Rotini.melty_led_offset_CW = 0.698132 + 0.09 * 9.0;
+    } else if (SWB_forward.is_held()) {  //up pos trims lag angle
       if (left_left_arrow.just_pressed())
-        Rotini.melty_led_offset_CCW += 0.09; //about 5 degrees
+        Rotini.melty_led_offset_CCW += 0.1;  //about 5 degrees
       else if (left_right_arrow.just_pressed())
-        Rotini.melty_led_offset_CCW -= 0.09; //about 5 degrees
+        Rotini.melty_led_offset_CCW -= 0.1;  //about 5 degrees
       else if (left_up_arrow.is_held())
-        Rotini.melty_led_offset_CCW = 0.698132 - 0.09*6.0;
+        Rotini.melty_led_offset_CCW = 0.698132 - 0.09 * 6.0;
     }
 
     Rotini.meltyStateUpdate();
@@ -179,21 +193,21 @@ void loop() {
   digitalWrite(PIN_MELTY_LED, Rotini.melty_led);
   digitalWrite(PIN_STATUS_LED, Rotini.status_led);
 
+  //send telemetry twice a second
   uint64_t last_telem_ms;
-  if(last_telem_ms - millis() > 500){ //send telemetry twice a second
+  if (last_telem_ms - millis() > 500) {
     float vin = read_voltage(PIN_SNS_VIN);
     //Serial.println(vin);
     send_telemetry(vin);
-    last_telem_ms = millis();    
+    last_telem_ms = millis();
   }
-
 }
 
 //////////////////// Helper functions ////////////////////////////////////////////////////////////////////
 
 float LIS331_to_mps2(int16_t native_units) {
-    // TODO: This is only correct in 400g mode. Should update when scale changes.
-    return ((400.0f * native_units) / 2047.0f) * 9.80665f;
+  // TODO: This is only correct in 400g mode. Should update when scale changes.
+  return ((400.0f * native_units) / 2047.0f) * 9.80665f;
 }
 
 float channel_to_axis(unsigned int channel) {
@@ -204,19 +218,18 @@ float channel_to_axis(unsigned int channel) {
 
 float read_voltage(int pin_sense_voltage) {
   uint16_t raw_adc_vin = analogRead(pin_sense_voltage);
-  //Serial.print(raw_adc_vin);  Serial.print(" ");
 
-  const static uint16_t adc_vals[]     = { 0, 1962,2380,2785,3200,3610,4000,4410,4795,5164,5500,5810,6080,6350,6580,6785 ,8573 };
-  const static uint16_t voltage_vals[] = { 0, 5,6,7,8,9,10,11,12,13,14,15,16,17,18,19 ,27 };
+  //normailze the voltage reading based on data
+  const static uint16_t adc_vals[] = { 0, 1962, 2380, 2785, 3200, 3610, 4000, 4410, 4795, 5164, 5500, 5810, 6080, 6350, 6580, 6785, 8573 };
+  const static uint16_t voltage_vals[] = { 0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 27 };
   const static uint8_t len = sizeof(voltage_vals) / sizeof(voltage_vals[0]);
-
   if (raw_adc_vin < adc_vals[0]) return voltage_vals[0];
   for (uint8_t i = 0; i < len - 1; i++) {
-      if (raw_adc_vin < adc_vals[i+1]) {
-          return lerp(raw_adc_vin, adc_vals[i], adc_vals[i+1], voltage_vals[i], voltage_vals[i+1]);
-      }
+    if (raw_adc_vin < adc_vals[i + 1]) {
+      return lerp(raw_adc_vin, adc_vals[i], adc_vals[i + 1], voltage_vals[i], voltage_vals[i + 1]);
+    }
   }
-  return voltage_vals[len-1];
+  return voltage_vals[len - 1];
 }
 
 void send_telemetry(float telem_voltage) {
@@ -232,5 +245,4 @@ void send_telemetry(float telem_voltage) {
   //   .groundspeed = htobe16((uint16_t)(RotiniPtr->percent_power * 100)),          // 10 big endian
   //   .heading = htobe16((uint16_t)(RotiniPtr->accelerometer_radius_trim * 1000))  // 10 big endian
   // };
-
 }
