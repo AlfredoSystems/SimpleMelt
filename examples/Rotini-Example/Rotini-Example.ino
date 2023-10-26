@@ -34,7 +34,6 @@ ESC foo;
 ESC bar;
 
 void setup() {
-  //get mag data
   Rotini.melty_led_offset_CW = 1.5;     // radians (CCW is positive)
   Rotini.melty_led_offset_CCW = 3.3;    // radians (CCW is positive)
   Rotini.turn_speed = 1.1;              // rotations per second

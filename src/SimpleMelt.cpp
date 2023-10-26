@@ -51,6 +51,66 @@ void SimpleMelt::meltyStateUpdate() {
    status_led = true;
 }
 
+float comp_xy = 0;
+float comp_z = 0;
+float comp_atan2 = 0;
+float alpha_xy = 0.75;
+float alpha_z = 0.75;
+float alpha_arctan2 = 0.75;
+
+void SimpleMelt::meltyMagStateUpdate() {
+
+   float stick_angle = atan2(throttle, 0); // No omnidirectional movement
+   float stick_magnitude = fconstrain(magnitude(0, throttle), 0, 1);
+   spin_power = fconstrain(spin_power, 0, 1);
+   
+   //stick_angle += motor_lag_angle * (reversed ? -1 : 1);
+
+   uint64_t time_step;
+   if (micros() < previous_melty_frame_us) time_step = 0;
+   else time_step = micros() - previous_melty_frame_us;
+   previous_melty_frame_us = micros();
+   if (time_step > 500000) time_step = 0; // Just switched to melty mode, bad frame
+
+   //-----------------mag-stuff------------------------//
+
+        float magnetometer_xy = 0.7071 * (magnetometer_x + magnetometer_y);
+		
+        comp_xy = (comp_xy * alpha_xy) + (magnetometer_xy * (1-alpha_xy));
+        float filtered_xy = magnetometer_xy - comp_xy;
+
+        comp_z = (comp_z * alpha_z) + (magnetometer_z * (1-alpha_z));
+        float filtered_z = magnetometer_z - comp_z;
+
+        angle = atan2(filtered_xy, filtered_z);
+
+
+   //-----------------mag-stuff------------------------//
+   // Positive (pushed right) stick gives positive clockwise heading rotation
+   angle -= rotation * M_TWOPI * turn_speed * time_step * 0.000001;
+
+   // Angle from the robot's angle to the joystick's angle, from [-PI, PI)
+   float angle_diff = modulo((stick_angle - angle) + M_PI, M_TWOPI) - M_PI;
+
+   // Draw arc
+   float melty_led_offset = (!reversed) ? melty_led_offset_CW : melty_led_offset_CCW;
+   float melty_led_angle = modulo(angle - melty_led_offset, M_TWOPI);
+   melty_led = M_PI_4 < melty_led_angle && melty_led_angle < M_3PI_4;
+   
+   // Set motor speed
+   float deflection = spin_power * lerp(stick_magnitude, 0, 1, 0, 0.5);
+   if (angle_diff < 0) {
+     motor_power_foo = -1 * (spin_power + deflection * 3) * (reversed ? 1 : -1);
+     motor_power_bar =      (spin_power - deflection * 1) * (reversed ? 1 : -1);
+   } else {
+     motor_power_foo = -1 * (spin_power - deflection * 1) * (reversed ? 1 : -1);
+     motor_power_bar =      (spin_power + deflection * 3) * (reversed ? 1 : -1);
+   }
+     
+   // green status LED solid when connected
+   status_led = true;
+}
+
 void SimpleMelt::arcadeStateUpdate() {
     throttle *= -1;
     rotation *= -1;

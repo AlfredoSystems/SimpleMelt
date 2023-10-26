@@ -25,6 +25,8 @@ const int PIN_MELTY_LED = 42;
 const int PIN_STATUS_LED = 41;
 const int PIN_SNS_VIN = 3;
 
+int16_t accel_x, accel_y, accel_z;
+
 volatile bool newDataAvailable = true;
 uint32_t rawValueX = 0;
 uint32_t rawValueY = 0;
@@ -46,12 +48,13 @@ ESC bar;
 SFE_MMC5983MA myMag;
 
 void setup() {
-  //get mag data
-  Rotini.melty_led_offset_CW = 0.698132 + 0.09*9.0; // radians (CCW is positive)
-  Rotini.melty_led_offset_CCW = 0.698132 - 0.09*6.0; // radians (CCW is positive)
-  Rotini.turn_speed = 1.1; // rotations per second
-  Rotini.accelerometer_radius = 0.090; // meters
-  Rotini.radius_trim = 0.002*16.0; // meters
+  delay(1000);
+
+  Rotini.melty_led_offset_CW = 1.5;     // radians (CCW is positive)
+  Rotini.melty_led_offset_CCW = 3.3;    // radians (CCW is positive)
+  Rotini.turn_speed = 1.1;              // rotations per second
+  Rotini.accelerometer_radius = 0.090;  // meters
+  Rotini.radius_trim = 0.032;           // meters
 
   pinMode(PIN_STATUS_LED, OUTPUT);
   pinMode(PIN_MELTY_LED, OUTPUT);
@@ -76,7 +79,8 @@ void setup() {
   accelerometer.setFullScale(accelerometer.HIGH_RANGE); //400g range
 
   beginMag();
-
+  newDataAvailable = true;
+  
   foo.begin(PIN_MOTOR_FOO, 0);
   bar.begin(PIN_MOTOR_BAR, 1);
   foo.setReversed(true);
@@ -125,11 +129,10 @@ void loop() {
   }
 
   if (Rotini.drive_mode == MELTY) {
-    int16_t x, y, z;
-    accelerometer.readAxes(x, y, z);
-    Rotini.accelerometer_x = 0; //LIS331_to_mps2(x);
-    Rotini.accelerometer_y = 0; //LIS331_to_mps2(y);
-    Rotini.accelerometer_z = LIS331_to_mps2(z);
+    accelerometer.readAxes(accel_x, accel_y, accel_z);
+    Rotini.accelerometer_x = 0; //LIS331_to_mps2(accel_x);
+    Rotini.accelerometer_y = 0; //LIS331_to_mps2(accel_y);
+    Rotini.accelerometer_z = LIS331_to_mps2(accel_z);
 
     if (right_bumper.just_pressed())
       Rotini.spin_power += 0.02;
@@ -148,34 +151,16 @@ void loop() {
     else if (SWD_forward.is_held())
       Rotini.reversed = true;
 
-    // if(SWB_backward.is_held()){  //default down trims accel radius
-    //   if (left_left_arrow.just_pressed())
-    //     Rotini.radius_trim += 0.002;
-    //   else if (left_right_arrow.just_pressed())
-    //     Rotini.radius_trim -= 0.002;
-    //   else if (left_up_arrow.is_held())
-    //     Rotini.radius_trim = 0;
-    // } else if(SWB_neutral.is_held()) { //middle pos trims led offset
-    //   if (left_left_arrow.just_pressed())
-    //     Rotini.melty_led_offset_CW += 0.09; //about 5 degrees
-    //   else if (left_right_arrow.just_pressed())
-    //     Rotini.melty_led_offset_CW -= 0.09; //about 5 degrees
-    //   else if (left_up_arrow.is_held())
-    //     Rotini.melty_led_offset_CW = 0.698132 + 0.09*9.0;
-    // } else if(SWB_forward.is_held()) { //up pos trims lag angle
-    //   if (left_left_arrow.just_pressed())
-    //     Rotini.melty_led_offset_CCW += 0.09; //about 5 degrees
-    //   else if (left_right_arrow.just_pressed())
-    //     Rotini.melty_led_offset_CCW -= 0.09; //about 5 degrees
-    //   else if (left_up_arrow.is_held())
-    //     Rotini.melty_led_offset_CCW = 0.698132 - 0.09*6.0;
-    // }
-    updateMag();
-    Rotini.meltyStateUpdate();
+    if(updateMag()){
+      Rotini.magnetometer_x = scaledX;
+      Rotini.magnetometer_y = scaledY;
+      Rotini.magnetometer_z = scaledZ;
+      Rotini.meltyMagStateUpdate();
+    }
 
-    //if(SWB_backward.is_held()) else
-    if(SWB_neutral.is_held()) addToMagLog();
-    else if(SWB_forward.is_held()) printMagLog();
+    if(SWB_backward.is_held()) printMag();
+    else if(SWB_neutral.is_held()) addToMagLog();
+    else if(SWB_forward.is_held()){ printMagLog(); delay(3000);}
     
   } else if (Rotini.drive_mode == ARCADE) {
     Rotini.arcadeStateUpdate();
@@ -209,10 +194,11 @@ const int maglog_len = 2000; //1000 = 10ish% of dyamic memory
 int maglog_count = 0;
 
 typedef struct {
-  unsigned long long accelerometer_timestamp;
-  uint32_t raw_x;
-  uint32_t raw_y;
-  uint32_t raw_z;
+  unsigned long long log_timestamp;
+  uint16_t accel_raw_z;
+  uint32_t mag_raw_x;
+  uint32_t mag_raw_y;
+  uint32_t mag_raw_z;
   unsigned long long angle_timestamp;
   float angle;
 } magLogPacket_t;
@@ -221,10 +207,11 @@ magLogPacket_t magLog[maglog_len];
 
 void addToMagLog(){
   if(maglog_count < maglog_len){
-    magLog[maglog_count].accelerometer_timestamp = micros();
-    magLog[maglog_count].raw_x = rawValueX;
-    magLog[maglog_count].raw_y = rawValueY;
-    magLog[maglog_count].raw_z = rawValueZ;
+    magLog[maglog_count].log_timestamp = micros();
+    magLog[maglog_count].accel_raw_z = accel_z;
+    magLog[maglog_count].mag_raw_x = rawValueX;
+    magLog[maglog_count].mag_raw_y = rawValueY;
+    magLog[maglog_count].mag_raw_z = rawValueZ;
     magLog[maglog_count].angle_timestamp = Rotini.previous_melty_frame_us;
     magLog[maglog_count].angle = Rotini.angle;
     maglog_count++;
@@ -235,12 +222,13 @@ void printMagLog(){
   Serial.println("dumping log in 3 seconds!:");
   delay(3000);
   for(int i = 0; i < maglog_len; i++){
-    Serial.print(accelerometer_timestamp); Serial.print(", ");
-    Serial.print(rawValueX); Serial.print(", ");
-    Serial.print(rawValueY); Serial.print(", ");
-    Serial.print(rawValueZ); Serial.print(", ");
-    Serial.print(angle_timestamp); Serial.print(", ");
-    Serial.println(angle);
+    Serial.print(magLog[i].log_timestamp); Serial.print(", ");
+    Serial.print(magLog[i].accel_raw_z); Serial.print(", ");
+    Serial.print(magLog[i].mag_raw_x); Serial.print(", ");
+    Serial.print(magLog[i].mag_raw_y); Serial.print(", ");
+    Serial.print(magLog[i].mag_raw_z); Serial.print(", ");
+    Serial.print(magLog[i].angle_timestamp); Serial.print(", ");
+    Serial.println(magLog[i].angle);
   }
   delay(5000);
 }
@@ -272,7 +260,7 @@ void beginMag(){
     newDataAvailable = true;
 }
 
-void updateMag(){
+bool updateMag(){
   if (newDataAvailable == true){
     newDataAvailable = false; // Clear our interrupt flag
     myMag.clearMeasDoneInterrupt(); // Clear the MMC5983 interrupt
@@ -285,15 +273,18 @@ void updateMag(){
     scaledZ = (double)rawValueZ - 131072.0;
     scaledZ /= 131072.0;
 
+    return true;
+  }
+  return false;
+}
+
+void printMag(){
     Serial.print("X: ");
     Serial.print(scaledX * 800.0, 3);
     Serial.print("   Y: ");
     Serial.print(scaledY * 800.0, 3);
     Serial.print("   Z: ");
     Serial.println(scaledZ * 800.0, 3);
-
-
-  }
 }
 
 void interruptRoutine()

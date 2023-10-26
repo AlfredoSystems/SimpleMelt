@@ -12,6 +12,7 @@ class SimpleMelt {
    public:
 
       void meltyStateUpdate();
+      void meltyMagStateUpdate();
       void arcadeStateUpdate();
       void stopStateUpdate();
       void disconnectedStateUpdate();
@@ -31,6 +32,10 @@ class SimpleMelt {
       float accelerometer_x;
       float accelerometer_y;
       float accelerometer_z;
+	  
+	  float magnetometer_x;
+      float magnetometer_y;
+      float magnetometer_z;
 
       float spin_power = 0;
       float angle = 0;
