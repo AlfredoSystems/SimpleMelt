@@ -5,7 +5,7 @@
 #include "SimpleMelt.h"
 #include "SimpleMeltUtility.h"
 
-#include "ArduinoCRSF.h"
+#include "AlfredoCRSF.h"
 #include "SparkFun_LIS331.h"
 
 const int PIN_SPI_SCK = 17;
@@ -26,7 +26,7 @@ const int PIN_SNS_VIN = 3;
 SimpleMelt Rotini;
 
 HardwareSerial crsfSerial(1);
-ArduinoCRSF crsf;
+AlfredoCRSF crsf;
 
 LIS331 accelerometer;
 

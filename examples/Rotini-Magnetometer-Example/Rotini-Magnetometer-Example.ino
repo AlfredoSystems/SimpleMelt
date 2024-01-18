@@ -5,7 +5,7 @@
 #include "SimpleMelt.h"
 #include "SimpleMeltUtility.h"
 
-#include "ArduinoCRSF.h"
+#include "AlfredoCRSF.h"
 #include "SparkFun_LIS331.h"
 
 #include "mmc.h"
@@ -38,7 +38,7 @@ double scaledZ = 0;
 SimpleMelt Rotini;
 
 HardwareSerial crsfSerial(1);
-ArduinoCRSF crsf;
+AlfredoCRSF crsf;
 
 LIS331 accelerometer;
 

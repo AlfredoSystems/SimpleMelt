@@ -1,2 +1,2 @@
 # SimpleMelt
-Open Source Meltybrain control firmware, designed for use with "Rotini" Metlybrain control PCB
+Open Source Meltybrain control firmware, designed for use with "Rotini" Metlybrain control PCB. This library uses two additional arduino libraries, SparkFun_LIS331_Arduino_Library and AlfredoCRSF
