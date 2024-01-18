@@ -31,7 +31,7 @@ void Button::update(int channel_value, int target_value) {
 }
 
 
-bool ESC::begin(uint8_t pin, uint8_t channel) {
+bool OneShot125::begin(uint8_t pin, uint8_t channel) {
     this->pin = pin;
     this->channel = channel;
     
@@ -44,14 +44,13 @@ bool ESC::begin(uint8_t pin, uint8_t channel) {
     return true;
 }
 
-void ESC::set_percent(float percent) {
-    percent *= (reversed ? -1 : 1); // TODO: Temporary for NHRL finals while motors are inverted
-    // TODO: The old ESCs used a 50-100% duty cycle, but these use 5-10%. Why?
-    percent = percent > 1 ? 1 : percent < -1 ? -1 : percent; // Constrain -1...1
-    percent = (percent / 40.0f) + 0.075f; // Map to 0.05...0.1
+void OneShot125::set_percent(float percent) {
+    percent = fconstrain(percent, 1, 1); // Constrain -1...1
+    percent *= (reversed ? -1 : 1);
+    percent = (percent / 40.0f) + 0.075f; // Map -1...1 to 0.05...0.1
     ledcWrite(channel, percent * (1 << PWM_RESOLUTION));
 }
 
-void ESC::stop() {
+void OneShot125::stop() {
     set_percent(0);
 }

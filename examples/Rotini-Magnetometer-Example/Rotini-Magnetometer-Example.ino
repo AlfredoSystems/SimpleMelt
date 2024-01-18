@@ -42,8 +42,8 @@ ArduinoCRSF crsf;
 
 LIS331 accelerometer;
 
-ESC foo;
-ESC bar;
+OneShot125 foo;
+OneShot125 bar;
 
 SFE_MMC5983MA myMag;
 

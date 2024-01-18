@@ -17,7 +17,7 @@ class Button {
       bool prev_held = false;
 };
 
-class ESC {
+class OneShot125 {
     public:
         bool begin(uint8_t pin, uint8_t channel); // Channels: 0 thru 7
 

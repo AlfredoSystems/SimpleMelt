@@ -30,8 +30,8 @@ ArduinoCRSF crsf;
 
 LIS331 accelerometer;
 
-ESC foo;
-ESC bar;
+OneShot125 foo;
+OneShot125 bar;
 
 void setup() {
   Rotini.melty_led_offset_CW = 1.5;     // radians (CCW is positive)
@@ -128,48 +128,51 @@ void loop() {
   }
 
   if (Rotini.drive_mode == MELTY) {
+	// Reads the accelerometer and passes that info to the Rotini object
     int16_t x, y, z;
     accelerometer.readAxes(x, y, z);
-    Rotini.accelerometer_x = 0;  //LIS331_to_mps2(x);
-    Rotini.accelerometer_y = 0;  //LIS331_to_mps2(y);
+    Rotini.accelerometer_x = 0; // LIS331_to_mps2(x);
+    Rotini.accelerometer_y = 0; // LIS331_to_mps2(y);
     Rotini.accelerometer_z = LIS331_to_mps2(z);
 
+	// Spin_power is the average power that motors are set to.
     if (right_bumper.just_pressed())
-      Rotini.spin_power += 0.02;
+      Rotini.spin_power += 0.02; // increase power by 2%
     if (left_bumper.just_pressed())
-      Rotini.spin_power -= 0.02;
-
+      Rotini.spin_power -= 0.02; // decrease power by 2%
     if (right_up_arrow.is_held() || right_down_arrow.is_held())
-      Rotini.spin_power = 0;
-    else if (right_right_arrow.is_held())
-      Rotini.spin_power = 1;
+      Rotini.spin_power = 0;     // 0% power, the robot does not spin
     else if (right_left_arrow.is_held() || right_right_arrow.just_released())
-      Rotini.spin_power = 0.18;  //this is "cruising power"
+      Rotini.spin_power = 0.18;  // 18% power, "cruising power" is what I are using most of the time during a match
+    else if (right_right_arrow.is_held())
+      Rotini.spin_power = 1;     // 100% power, I press this to accelerate from stand still, to get out of pins, or deal extra damage
 
+	// Controls what direction the motors are spinning in
     if (SWD_backward.is_held())
       Rotini.reversed = false;
     else if (SWD_forward.is_held())
       Rotini.reversed = true;
 
-    if (SWB_backward.is_held()) {  //default down trims accel radius
+	// SWB has three states, the state of SWB controls what certain trim buttons do
+    if (SWB_backward.is_held()) {  // trims accel radius
       if (left_left_arrow.just_pressed())
         Rotini.radius_trim += 0.002;  // 2 mm
       else if (left_right_arrow.just_pressed())
         Rotini.radius_trim -= 0.002;  // 2 mm
       else if (left_up_arrow.is_held())
         Rotini.radius_trim = 0;
-    } else if (SWB_neutral.is_held()) {  //middle pos trims led offset
+    } else if (SWB_neutral.is_held()) {  // middle pos trims led offset
       if (left_left_arrow.just_pressed())
-        Rotini.melty_led_offset_CW += 0.1;  //about 5 degrees
+        Rotini.melty_led_offset_CW += 0.1;  // 0.1 radians = 5.729 degrees
       else if (left_right_arrow.just_pressed())
-        Rotini.melty_led_offset_CW -= 0.1;  //about 5 degrees
+        Rotini.melty_led_offset_CW -= 0.1;  // 0.1 radians = 5.729 degrees
       else if (left_up_arrow.is_held())
         Rotini.melty_led_offset_CW = 0.698132 + 0.09 * 9.0;
-    } else if (SWB_forward.is_held()) {  //up pos trims lag angle
+    } else if (SWB_forward.is_held()) {  // up pos trims lag angle
       if (left_left_arrow.just_pressed())
-        Rotini.melty_led_offset_CCW += 0.1;  //about 5 degrees
+        Rotini.melty_led_offset_CCW += 0.1;  // 0.1 radians = 5.729 degrees
       else if (left_right_arrow.just_pressed())
-        Rotini.melty_led_offset_CCW -= 0.1;  //about 5 degrees
+        Rotini.melty_led_offset_CCW -= 0.1;  // 0.1 radians = 5.729 degrees
       else if (left_up_arrow.is_held())
         Rotini.melty_led_offset_CCW = 0.698132 - 0.09 * 6.0;
     }
