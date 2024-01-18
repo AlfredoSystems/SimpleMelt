@@ -8,7 +8,7 @@
 
 SimpleMelt KEYWORD1
 Button KEYWORD1
-ESC KEYWORD1
+OneShot125 KEYWORD1
 #######################################
 # Methods and Functions (KEYWORD2)
 #######################################
@@ -17,6 +17,7 @@ meltyStateUpdate KEYWORD2
 arcadeStateUpdate KEYWORD2
 stopStateUpdate KEYWORD2
 disconnectedStateUpdate KEYWORD2
+meltyMagStateUpdate KEYWORD2
 
 is_held KEYWORD2
 just_released KEYWORD2
