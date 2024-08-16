@@ -45,7 +45,7 @@ bool OneShot125::begin(uint8_t pin, uint8_t channel) {
 }
 
 void OneShot125::set_percent(float percent) {
-    percent = fconstrain(percent, 1, 1); // Constrain -1...1
+    percent = fconstrain(percent, -1, 1); // Constrain -1...1
     percent *= (reversed ? -1 : 1);
     percent = (percent / 40.0f) + 0.075f; // Map -1...1 to 0.05...0.1
     ledcWrite(channel, percent * (1 << PWM_RESOLUTION));

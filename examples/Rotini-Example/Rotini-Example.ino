@@ -20,6 +20,7 @@ const int PIN_CRSF_TX = 8;
 const int PIN_MOTOR_FOO = 34;
 const int PIN_MOTOR_BAR = 35;
 const int PIN_MELTY_LED = 42;
+//const int PIN_MELTY_LED = 40; //for jank board
 const int PIN_STATUS_LED = 41;
 const int PIN_SNS_VIN = 3;
 
@@ -34,8 +35,8 @@ OneShot125 foo;
 OneShot125 bar;
 
 void setup() {
-  Rotini.melty_led_offset_CW = 1.5;     // radians (CCW is positive)
-  Rotini.melty_led_offset_CCW = 3.3;    // radians (CCW is positive)
+  Rotini.melty_led_offset_CW = 2.22;     // radians (CCW is positive)
+  Rotini.melty_led_offset_CCW = 4.02;    // radians (CCW is positive)
   Rotini.turn_speed = 1.1;              // rotations per second
   Rotini.accelerometer_radius = 0.090;  // meters
   Rotini.radius_trim = 0.032;           // meters
@@ -71,6 +72,7 @@ void setup() {
 void loop() {
 
   crsf.update();
+  Serial.println(crsf.getChannel(6));
 
   Rotini.rotation = channel_to_axis(1);  //axis_right_x
   Rotini.throttle = channel_to_axis(3);  //axis_left_y
@@ -192,12 +194,13 @@ void loop() {
   // Actually commanding LEDs and motors
   foo.set_percent(Rotini.motor_power_foo);
   bar.set_percent(Rotini.motor_power_bar);
+  
   digitalWrite(PIN_MELTY_LED, Rotini.melty_led);
   digitalWrite(PIN_STATUS_LED, Rotini.status_led);
 
-  //send telemetry twice a second
+  //send telemetry 10 times a second
   uint64_t last_telem_ms;
-  if (last_telem_ms - millis() > 500) {
+  if (last_telem_ms - millis() > 100) {
     float vin = read_voltage(PIN_SNS_VIN);
     //Serial.println(vin);
     send_telemetry(vin);
@@ -219,19 +222,8 @@ float channel_to_axis(unsigned int channel) {
 }
 
 float read_voltage(int pin_sense_voltage) {
-  uint16_t raw_adc_vin = analogRead(pin_sense_voltage);
-
-  //normailze the voltage reading based on data
-  const static uint16_t adc_vals[] = { 0, 1962, 2380, 2785, 3200, 3610, 4000, 4410, 4795, 5164, 5500, 5810, 6080, 6350, 6580, 6785, 8573 };
-  const static uint16_t voltage_vals[] = { 0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 27 };
-  const static uint8_t len = sizeof(voltage_vals) / sizeof(voltage_vals[0]);
-  if (raw_adc_vin < adc_vals[0]) return voltage_vals[0];
-  for (uint8_t i = 0; i < len - 1; i++) {
-    if (raw_adc_vin < adc_vals[i + 1]) {
-      return lerp(raw_adc_vin, adc_vals[i], adc_vals[i + 1], voltage_vals[i], voltage_vals[i + 1]);
-    }
-  }
-  return voltage_vals[len - 1];
+  float adc_vin = analogReadMilliVolts(pin_sense_voltage) * 0.001 * 8.21;
+  return adc_vin;
 }
 
 void send_telemetry(float telem_voltage) {
