@@ -34,9 +34,14 @@ void Button::update(int channel_value, int target_value) {
 bool OneShot125::begin(uint8_t pin, uint8_t channel) {
     this->pin = pin;
     this->channel = channel;
-    
+
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    // Core 3.x: channels are managed internally; attach/write by pin.
+    ledcAttach(pin, PWM_FREQUENCY, PWM_RESOLUTION);
+#else
     ledcSetup(channel, PWM_FREQUENCY, PWM_RESOLUTION);
     ledcAttachPin(pin, channel);
+#endif
 
     for (float power = 0; power <= 1; power += 0.001) set_percent(power);
     for (float power = 1; power >= 0; power -= 0.001) set_percent(power);
@@ -48,7 +53,11 @@ void OneShot125::set_percent(float percent) {
     percent = fconstrain(percent, -1, 1); // Constrain -1...1
     percent *= (reversed ? -1 : 1);
     percent = (percent / 40.0f) + 0.075f; // Map -1...1 to 0.05...0.1
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+    ledcWrite(pin, percent * (1 << PWM_RESOLUTION));
+#else
     ledcWrite(channel, percent * (1 << PWM_RESOLUTION));
+#endif
 }
 
 void OneShot125::stop() {

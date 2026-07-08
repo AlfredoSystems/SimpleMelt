@@ -27,7 +27,7 @@ class OneShot125 {
         void setReversed(bool isReversed) {reversed = isReversed; };
     private:
         uint8_t channel;
-        uint16_t pin;
+        uint8_t pin;
         bool reversed = false;
         static const int PWM_FREQUENCY = 400; // Hz
         static const int PWM_RESOLUTION = 12; // bits

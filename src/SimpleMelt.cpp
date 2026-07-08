@@ -50,19 +50,13 @@ void SimpleMelt::meltyStateUpdate() {
    status_led = true;
 }
 
-float comp_xy = 0;
-float comp_z = 0;
-float comp_atan2 = 0;
-float alpha_xy = 0.75;
-float alpha_z = 0.75;
-float alpha_arctan2 = 0.75;
-
 void SimpleMelt::meltyMagStateUpdate() {
 
-   float stick_angle = atan2(throttle, 0); // No omnidirectional movement
-   float stick_magnitude = fconstrain(magnitude(0, throttle), 0, 1);
+   // Stick has no omnidirectional movement, so heading is straight up or down
+   float stick_angle = (throttle >= 0) ? M_PI_2 : -M_PI_2;
+   float stick_magnitude = fconstrain(fabs(throttle), 0, 1);
    spin_power = fconstrain(spin_power, 0, 1);
-   
+
    //stick_angle += motor_lag_angle * (reversed ? -1 : 1);
 
    uint32_t now_us = micros();
@@ -110,36 +104,36 @@ void SimpleMelt::meltyMagStateUpdate() {
 }
 
 void SimpleMelt::arcadeStateUpdate() {
-    throttle *= -1;
-    rotation *= -1;
+    float fwd = -throttle;
+    float turn = -rotation;
     float leftPower = 0;
     float rightPower = 0;
-    float maxInput = (throttle > 0 ? 1 : -1) * max(fabs(throttle), fabs(rotation));
-    if (throttle > 0) {
-        if (rotation > 0) {
+    float maxInput = (fwd > 0 ? 1 : -1) * max(fabs(fwd), fabs(turn));
+    if (fwd > 0) {
+        if (turn > 0) {
             leftPower = maxInput;
-            rightPower = throttle - rotation;
+            rightPower = fwd - turn;
         }
         else {
-            leftPower = throttle + rotation;
+            leftPower = fwd + turn;
             rightPower = maxInput;
         }
     } else {
-        if (rotation > 0) {
+        if (turn > 0) {
             leftPower = maxInput;
-            rightPower = throttle + rotation;
+            rightPower = fwd + turn;
         }
         else {
-            leftPower = throttle - rotation;
+            leftPower = fwd - turn;
             rightPower = maxInput;
         }
     }
-    
+
    melty_led = true;
-    
-   motor_power_foo = leftPower * 0.1;
-   motor_power_bar = rightPower * 0.1;
-   
+
+   motor_power_foo = leftPower * arcade_power;
+   motor_power_bar = rightPower * arcade_power;
+
    // green status LED solid when connected
    status_led = true;
 }

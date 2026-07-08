@@ -3,11 +3,6 @@
       
 enum DriveMode { NO_CONNECTION, STOP, ARCADE, MELTY };
 
-float lerp(float val, float in_min, float in_max, float out_min, float out_max);
-float fconstrain(float x, float min, float max);
-float magnitude(float x, float y);
-float modulo(float x, float n);
-    
 class SimpleMelt {
    public:
 
@@ -23,7 +18,14 @@ class SimpleMelt {
       float motor_lag_angle = 0; // radians
       float accelerometer_radius = 0.1; // meters
       float radius_trim = 0; //meters
-      
+      float arcade_power = 0.1; // scales arcade-mode motor output (0...1)
+
+      // Magnetometer complementary-filter state/tuning (meltyMagStateUpdate)
+      float comp_xy = 0;
+      float comp_z = 0;
+      float alpha_xy = 0.75;
+      float alpha_z = 0.75;
+
       DriveMode drive_mode = STOP;
       
       float throttle = 0;
