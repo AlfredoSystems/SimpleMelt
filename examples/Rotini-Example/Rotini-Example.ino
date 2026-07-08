@@ -72,8 +72,6 @@ void setup() {
 void loop() {
 
   crsf.update();
-  Serial.println(crsf.getChannel(6));
-
   Rotini.rotation = channel_to_axis(1);  //axis_right_x
   Rotini.throttle = channel_to_axis(3);  //axis_left_y
   //axis_right_y = channel_to_axis(2);
@@ -145,7 +143,7 @@ void loop() {
     if (right_up_arrow.is_held() || right_down_arrow.is_held())
       Rotini.spin_power = 0;     // 0% power, the robot does not spin
     else if (right_left_arrow.is_held() || right_right_arrow.just_released())
-      Rotini.spin_power = 0.18;  // 18% power, "cruising power" is what I are using most of the time during a match
+      Rotini.spin_power = 0.18;  // 18% power, "cruising power" is what I am using most of the time during a match
     else if (right_right_arrow.is_held())
       Rotini.spin_power = 1;     // 100% power, I press this to accelerate from stand still, to get out of pins, or deal extra damage
 

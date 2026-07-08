@@ -1,7 +1,7 @@
 #ifndef SIMPLEMELT_H
 #define SIMPLEMELT_H
       
-typedef enum DriveMode { NO_CONNECTION, STOP, ARCADE, MELTY};
+enum DriveMode { NO_CONNECTION, STOP, ARCADE, MELTY };
 
 float lerp(float val, float in_min, float in_max, float out_min, float out_max);
 float fconstrain(float x, float min, float max);

@@ -287,7 +287,7 @@ void printMag(){
     Serial.println(scaledZ * 800.0, 3);
 }
 
-void interruptRoutine()
+void IRAM_ATTR interruptRoutine()
 {
     newDataAvailable = true;
 }
