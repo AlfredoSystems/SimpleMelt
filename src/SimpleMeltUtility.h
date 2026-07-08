@@ -28,7 +28,7 @@ class OneShot125 {
     private:
         uint8_t channel;
         uint16_t pin;
-        bool reversed;
+        bool reversed = false;
         static const int PWM_FREQUENCY = 400; // Hz
         static const int PWM_RESOLUTION = 12; // bits
 };

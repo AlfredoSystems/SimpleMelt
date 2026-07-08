@@ -178,8 +178,8 @@ void loop() {
   digitalWrite(PIN_MELTY_LED, Rotini.melty_led);
   digitalWrite(PIN_STATUS_LED, Rotini.status_led);
 
-  uint64_t last_telem_ms;
-  if(last_telem_ms - millis() > 500){ //send telemetry twice a second
+  static uint32_t last_telem_ms = 0;
+  if(millis() - last_telem_ms > 500){ //send telemetry twice a second
     float vin = read_voltage(PIN_SNS_VIN);
     //Serial.println(vin);
     send_telemetry(vin);
