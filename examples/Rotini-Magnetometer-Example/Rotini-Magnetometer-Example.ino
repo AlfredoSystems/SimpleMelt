@@ -195,7 +195,7 @@ int maglog_count = 0;
 
 typedef struct {
   unsigned long long log_timestamp;
-  uint16_t accel_raw_z;
+  int16_t accel_raw_z;
   uint32_t mag_raw_x;
   uint32_t mag_raw_y;
   uint32_t mag_raw_z;

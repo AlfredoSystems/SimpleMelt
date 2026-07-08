@@ -12,10 +12,9 @@ void SimpleMelt::meltyStateUpdate() {
    
    //stick_angle += motor_lag_angle * (reversed ? -1 : 1);
 
-   uint64_t time_step;
-   if (micros() < previous_melty_frame_us) time_step = 0;
-   else time_step = micros() - previous_melty_frame_us;
-   previous_melty_frame_us = micros();
+   uint32_t now_us = micros();
+   uint32_t time_step = now_us - (uint32_t)previous_melty_frame_us;
+   previous_melty_frame_us = now_us;
    if (time_step > 500000) time_step = 0; // Just switched to melty mode, bad frame
 
    float cen_accel = sqrt(accelerometer_x * accelerometer_x + accelerometer_y * accelerometer_y + accelerometer_z * accelerometer_z);
@@ -23,7 +22,7 @@ void SimpleMelt::meltyStateUpdate() {
 
    // Trapezoidal Riemann sum to calculate change in angle
    float delta_angle = (angular_vel + previous_ang_vel) * 0.5 * time_step * 0.000001;
-   angle = fmod(angle + delta_angle, M_TWOPI);
+   angle = modulo(angle + delta_angle, M_TWOPI);
    previous_ang_vel = angular_vel;
 
    // Positive (pushed right) stick gives positive clockwise heading rotation
@@ -66,10 +65,9 @@ void SimpleMelt::meltyMagStateUpdate() {
    
    //stick_angle += motor_lag_angle * (reversed ? -1 : 1);
 
-   uint64_t time_step;
-   if (micros() < previous_melty_frame_us) time_step = 0;
-   else time_step = micros() - previous_melty_frame_us;
-   previous_melty_frame_us = micros();
+   uint32_t now_us = micros();
+   uint32_t time_step = now_us - (uint32_t)previous_melty_frame_us;
+   previous_melty_frame_us = now_us;
    if (time_step > 500000) time_step = 0; // Just switched to melty mode, bad frame
 
    //-----------------mag-stuff------------------------//
