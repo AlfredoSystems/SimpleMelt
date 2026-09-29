@@ -9,6 +9,7 @@
 #include "SparkFun_LIS331.h"
 
 #include "mmc.h"
+#include "MagLog.h"
 
 const int PIN_SPI_SCK = 17;
 const int PIN_SPI_MISO = 1;
@@ -46,6 +47,8 @@ OneShot125 foo;
 OneShot125 bar;
 
 SFE_MMC5983MA myMag;
+
+MagLog<2000> magLog;  // 2000 rows ~= 56 kB
 
 void setup() {
   delay(1000);
@@ -159,9 +162,11 @@ void loop() {
     }
 
     if(SWB_backward.is_held()) printMag();
-    else if(SWB_neutral.is_held()) addToMagLog();
-    else if(SWB_forward.is_held()){ printMagLog(); delay(3000);}
-    
+    else if(SWB_neutral.is_held())
+      magLog.add(micros(), accel_z, rawValueX, rawValueY, rawValueZ,
+                 (uint32_t)Rotini.previous_melty_frame_us, Rotini.angle);
+    else if(SWB_forward.just_pressed()) magLog.startDump();
+
   } else if (Rotini.drive_mode == ARCADE) {
     Rotini.arcadeStateUpdate();
 
@@ -178,6 +183,9 @@ void loop() {
   digitalWrite(PIN_MELTY_LED, Rotini.melty_led);
   digitalWrite(PIN_STATUS_LED, Rotini.status_led);
 
+  // Drains a few log rows per pass when a dump is pending; no-op otherwise.
+  magLog.service();
+
   static uint32_t last_telem_ms = 0;
   if(millis() - last_telem_ms > 500){ //send telemetry twice a second
     float vin = read_voltage(PIN_SNS_VIN);
@@ -186,51 +194,6 @@ void loop() {
     last_telem_ms = millis();    
   }
 
-}
-
-/////////////////////Log Code/////////////////////////////////////////////////
-
-const int maglog_len = 2000; //1000 = 10ish% of dyamic memory
-int maglog_count = 0;
-
-typedef struct {
-  unsigned long long log_timestamp;
-  int16_t accel_raw_z;
-  uint32_t mag_raw_x;
-  uint32_t mag_raw_y;
-  uint32_t mag_raw_z;
-  unsigned long long angle_timestamp;
-  float angle;
-} magLogPacket_t;
-
-magLogPacket_t magLog[maglog_len];
-
-void addToMagLog(){
-  if(maglog_count < maglog_len){
-    magLog[maglog_count].log_timestamp = micros();
-    magLog[maglog_count].accel_raw_z = accel_z;
-    magLog[maglog_count].mag_raw_x = rawValueX;
-    magLog[maglog_count].mag_raw_y = rawValueY;
-    magLog[maglog_count].mag_raw_z = rawValueZ;
-    magLog[maglog_count].angle_timestamp = Rotini.previous_melty_frame_us;
-    magLog[maglog_count].angle = Rotini.angle;
-    maglog_count++;
-  }
-}
-
-void printMagLog(){
-  Serial.println("dumping log in 3 seconds!:");
-  delay(3000);
-  for(int i = 0; i < maglog_len; i++){
-    Serial.print(magLog[i].log_timestamp); Serial.print(", ");
-    Serial.print(magLog[i].accel_raw_z); Serial.print(", ");
-    Serial.print(magLog[i].mag_raw_x); Serial.print(", ");
-    Serial.print(magLog[i].mag_raw_y); Serial.print(", ");
-    Serial.print(magLog[i].mag_raw_z); Serial.print(", ");
-    Serial.print(magLog[i].angle_timestamp); Serial.print(", ");
-    Serial.println(magLog[i].angle);
-  }
-  delay(5000);
 }
 
 /////////////////////Magnetometer Code/////////////////////////////////////////////////
