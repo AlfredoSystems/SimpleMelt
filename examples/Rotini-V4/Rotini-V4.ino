@@ -219,6 +219,16 @@ void loop() {
   digitalWrite(PIN_MELTY_LED, Rotini.melty_led);
   digitalWrite(PIN_STATUS_LED, Rotini.status_led);
 
+  //send telemetry 10 times a second
+  static uint32_t last_telem_ms = 0;
+  if (millis() - last_telem_ms > 100) {
+    float vin = read_voltage(PIN_SNS_VIN);
+    //Serial.println(vin);
+    Telemetry.add("vin", vin);  // volts
+    send_telemetry(vin);
+    last_telem_ms = millis();
+  }
+
   Telemetry.add("drive_mode", Rotini.drive_mode);
   Telemetry.send();
 
@@ -228,16 +238,6 @@ void loop() {
     Telemetry.printStatus(Serial);
     if (!mag_ok) Serial.println("magnetometer: not found");
     last_status_ms = millis();
-  }
-
-  //send telemetry 10 times a second
-  static uint32_t last_telem_ms = 0;
-  if (millis() - last_telem_ms > 100) {
-    float vin = read_voltage(PIN_SNS_VIN);
-    //Serial.println(vin);
-    Telemetry.add("vin", vin);  // volts
-    send_telemetry(vin);
-    last_telem_ms = millis();
   }
 }
 
