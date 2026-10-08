@@ -7,6 +7,7 @@
 
 #include "AlfredoCRSF.h"
 #include "SparkFun_LIS331.h"
+#include <AlfredoDShot.h>
 #include <AlfredoTelemetry.h>
 
 #include "mmc.h"
@@ -37,10 +38,29 @@ SFE_MMC5983MA magnetometer;
 const uint16_t MAG_RATE_HZ = 1000;  // continuous mode rate: 1000, 200, 100, 50, 20, 10 or 1
 bool mag_ok = false;
 
-OneShot125 foo;
-OneShot125 bar;
+// ESCs run AM32 over bidirectional DShot. "3D mode" must be ON in the AM32
+// configurator: the DShot range is split in two halves, one per direction.
+// Rotini V4's signal path (BSS138 level shifter, 10k pull-up on the ESP side,
+// 5.1k on the ESC side, ~470 ohm inside the ESC) needs push-pull drive for
+// DSHOT600; with PUSH_PULL off, use DSHOT300. See AlfredoDShot's
+// Rotini_V4_Telemetry example.
+const DShotMode DSHOT_RATE = DSHOT600;
+const bool PUSH_PULL = true;
+const uint8_t MOTOR_POLES = 14;        // magnet count, for rpm telemetry
+const uint32_t DSHOT_PERIOD_US = 1000; // one frame per motor at 1 kHz
+const bool FOO_REVERSED = true;        // was foo.setReversed(true) with OneShot125
+const bool BAR_REVERSED = false;
+
+AlfredoDShot foo;
+AlfredoDShot bar;
 
 void setup() {
+  // Must be first, see AlfredoDShot.h: holds the ESC signal lines low so a
+  // rebooting AM32 leaves its bootloader. holdMs = 0 leaves FOO low and moves
+  // on, so both ESCs share one 2.5 s hold.
+  AlfredoDShot::releaseBootloader(PIN_MOTOR_FOO, 0);
+  AlfredoDShot::releaseBootloader(PIN_MOTOR_BAR);
+
   Rotini.melty_led_offset_CW = 2.22;     // radians (CCW is positive)
   Rotini.melty_led_offset_CCW = 4.02;    // radians (CCW is positive)
   Rotini.turn_speed = 1.1;              // rotations per second
@@ -74,10 +94,13 @@ void setup() {
 
   mag_ok = beginMag();
 
-  foo.begin(PIN_MOTOR_FOO, 0);
-  bar.begin(PIN_MOTOR_BAR, 1);
-  foo.setReversed(true);
-  bar.setReversed(false);
+  // AM32 arms after ~1 s of zero throttle; send() forces zero until then.
+  if (!foo.begin(PIN_MOTOR_FOO, DSHOT_RATE, true, MOTOR_POLES) ||
+      !bar.begin(PIN_MOTOR_BAR, DSHOT_RATE, true, MOTOR_POLES)) {
+    Serial.println("esc.begin() failed - out of RMT channels?");
+  }
+  foo.setPushPull(PUSH_PULL);
+  bar.setPushPull(PUSH_PULL);
 }
 
 void loop() {
@@ -212,12 +235,21 @@ void loop() {
     Rotini.disconnectedStateUpdate();
   }
 
-  // Actually commanding LEDs and motors
-  foo.set_percent(Rotini.motor_power_foo);
-  bar.set_percent(Rotini.motor_power_bar);
-  
+  // Actually commanding LEDs and motors. DShot frames go out at a steady
+  // rate: each send() also harvests the ESC's reply to the previous frame.
+  static uint32_t next_dshot_us = micros();
+  if ((int32_t)(micros() - next_dshot_us) >= 0) {
+    next_dshot_us = micros() + DSHOT_PERIOD_US;
+    foo.send(throttle3D(Rotini.motor_power_foo * (FOO_REVERSED ? -1 : 1)));
+    bar.send(throttle3D(Rotini.motor_power_bar * (BAR_REVERSED ? -1 : 1)));
+  }
+
   digitalWrite(PIN_MELTY_LED, Rotini.melty_led);
   digitalWrite(PIN_STATUS_LED, Rotini.status_led);
+
+  // Turns on Extended DShot Telemetry once each ESC is answering
+  updateEdt(foo, Rotini.motor_power_foo);
+  updateEdt(bar, Rotini.motor_power_bar);
 
   //send telemetry 10 times a second
   static uint32_t last_telem_ms = 0;
@@ -226,19 +258,79 @@ void loop() {
     //Serial.println(vin);
     Telemetry.add("vin", vin);  // volts
     send_telemetry(vin);
+
+    // EDT values are NAN until the ESC sends them; AM32 updates them at a few Hz
+    Telemetry.add("foo_temp_c", foo.temperatureC());
+    Telemetry.add("foo_volts", foo.voltage());
+    Telemetry.add("foo_amps", foo.current());
+    Telemetry.add("bar_temp_c", bar.temperatureC());
+    Telemetry.add("bar_volts", bar.voltage());
+    Telemetry.add("bar_amps", bar.current());
     last_telem_ms = millis();
   }
 
   Telemetry.add("drive_mode", Rotini.drive_mode);
+  Telemetry.add("heading", Rotini.angle * RAD_TO_DEG);  // 0..360, only updates in melty mode
+  Telemetry.add("motor_foo", Rotini.motor_power_foo);  // -1..1, 0 is stop
+  Telemetry.add("motor_bar", Rotini.motor_power_bar);
+  // Shaft rpm from the ESC's DShot reply; a gap while it isn't answering
+  Telemetry.add("foo_rpm", foo.telemetryValid() ? foo.rpm() : NAN);
+  Telemetry.add("bar_rpm", bar.telemetryValid() ? bar.rpm() : NAN);
   Telemetry.send();
 
   // Link diagnostics over USB, once a second
   static uint32_t last_status_ms = 0;
   if (millis() - last_status_ms >= 1000) {
     Telemetry.printStatus(Serial);
+    printMotor("foo", foo);
+    printMotor("bar", bar);
     if (!mag_ok) Serial.println("magnetometer: not found");
     last_status_ms = millis();
   }
+}
+
+/////////////////////ESC Code//////////////////////////////////////////////////////////
+
+// Motor power (-1..1) to a DShot value for an ESC in 3D mode:
+//   0            stop
+//   48..1047     reverse, slowest to fastest
+//   1048..2047   forward, slowest to fastest
+uint16_t throttle3D(float power) {
+  power = fconstrain(power, -1, 1);
+  if (!(fabsf(power) > 0)) return 0;  // also catches NaN
+  uint16_t steps = (uint16_t)(fabsf(power) * 999.0f + 0.5f);  // 0..999
+  return (power > 0 ? 1048 : 48) + steps;
+}
+
+// Sends DSHOT_CMD_EDT_ENABLE once the ESC is answering and stopped: a command
+// sent while AM32 is still booting is silently lost, so it is re-sent every
+// second until EDT frames arrive. Commands replace the throttle for a few
+// frames, which is why this only runs with the motor stopped.
+void updateEdt(AlfredoDShot &esc, float power) {
+  static uint32_t sent_ms[2] = {0, 0};
+  uint32_t &last_ms = sent_ms[&esc == &foo ? 0 : 1];
+  if (power != 0 || !esc.telemetryValid() || esc.commandPending()) return;
+  if (esc.edtSeen() || (last_ms && millis() - last_ms < 1000)) return;
+  esc.command(DSHOT_CMD_EDT_ENABLE);
+  last_ms = millis();
+}
+
+const char *dshotStatusName(DShotRxStatus s) {
+  switch (s) {
+    case DSHOT_RX_OK: return "OK";
+    case DSHOT_RX_NO_REPLY: return "NO-REPLY";
+    case DSHOT_RX_FRAMING: return "FRAMING";
+    case DSHOT_RX_BAD_GCR: return "BAD-GCR";
+    case DSHOT_RX_BAD_CRC: return "BAD-CRC";
+    default: return "IDLE";
+  }
+}
+
+// echo: 31 = wiring good, 0 = nothing on the line, 1-30 = weak pull-up
+void printMotor(const char *name, AlfredoDShot &esc) {
+  Serial.printf("%s: %s echo %u %-8s rpm %6.0f loss %5.1f%%\n",
+                name, esc.isArmed() ? "armed " : "arming", esc.echoPulses(),
+                dshotStatusName(esc.status()), esc.rpm(), esc.lossPercent());
 }
 
 /////////////////////Magnetometer Code/////////////////////////////////////////////////

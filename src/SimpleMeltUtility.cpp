@@ -37,7 +37,7 @@ bool OneShot125::begin(uint8_t pin, uint8_t channel) {
 
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
     // Core 3.x: channels are managed internally; attach/write by pin.
-    ledcAttach(pin, PWM_FREQUENCY, PWM_RESOLUTION);
+    if (!ledcAttach(pin, PWM_FREQUENCY, PWM_RESOLUTION)) return false;
 #else
     ledcSetup(channel, PWM_FREQUENCY, PWM_RESOLUTION);
     ledcAttachPin(pin, channel);
