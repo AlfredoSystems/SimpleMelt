@@ -4,6 +4,7 @@
 
 #include "SimpleMelt.h"
 #include "SimpleMeltUtility.h"
+#include "HeadingEstimator.h"
 
 #include "AlfredoCRSF.h"
 #include "SparkFun_LIS331.h"
@@ -38,6 +39,31 @@ SFE_MMC5983MA magnetometer;
 const uint16_t MAG_RATE_HZ = 1000;  // continuous mode rate: 1000, 200, 100, 50, 20, 10 or 1
 bool mag_ok = false;
 
+// Both sensors raise an INT line when a new sample is ready (LIS331 DRDY on
+// INT1, MMC5983MA measurement-done). The ISRs only set a flag; the SPI reads
+// happen in loop(). If an INT line never fires (wrong pin, or GPIO 36/37 taken
+// by octal PSRAM), the read falls back to a slow poll after SENSOR_TIMEOUT_US
+// and the once-a-second status line shows 0 interrupts/s for that sensor.
+volatile bool accel_ready = false;
+volatile bool mag_ready = false;
+volatile uint32_t accel_int_count = 0;  // ISR fires, for the status line
+volatile uint32_t mag_int_count = 0;
+uint32_t mag_fresh_count = 0, mag_stale_count = 0, loop_count = 0;  // status line rates
+const uint32_t SENSOR_TIMEOUT_US = 10000;
+
+void IRAM_ATTR accelISR() { accel_ready = true; accel_int_count++; }
+void IRAM_ATTR magISR() { mag_ready = true; mag_int_count++; }
+
+// Heading from accelerometer + magnetometer (see HeadingEstimator.h). Runs in every
+// drive mode so the compass holds the heading while parked. Set USE_HEADING_ESTIMATOR
+// false to fall back to the accelerometer-only dead reckoning.
+HeadingEstimator Heading;
+const bool USE_HEADING_ESTIMATOR = true;
+// +1 if the compass heading increases when `reversed` is false, -1 if it decreases.
+// Both 2026-10-07 logs spun with the compass heading increasing; if the LED arc
+// runs backwards after a direction change, flip this.
+const int MAG_SPIN_SIGN = 1;
+
 // ESCs run AM32 over bidirectional DShot. "3D mode" must be ON in the AM32
 // configurator: the DShot range is split in two halves, one per direction.
 // Rotini V4's signal path (BSS138 level shifter, 10k pull-up on the ESP side,
@@ -64,8 +90,17 @@ void setup() {
   Rotini.melty_led_offset_CW = 2.22;     // radians (CCW is positive)
   Rotini.melty_led_offset_CCW = 4.02;    // radians (CCW is positive)
   Rotini.turn_speed = 1.1;              // rotations per second
-  Rotini.accelerometer_radius = 0.090;  // meters
-  Rotini.radius_trim = 0.032;           // meters
+  Rotini.accelerometer_radius = 0.122;  // meters, accelerometer-only fallback only (was 0.090 + 0.032 trim)
+
+  // Calibration from the 2026-10-07 logs; the estimator learns r and the circle
+  // center from here. A_OFF is the one value it cannot learn: TODO measure it on
+  // the floor automatically and keep it (with r, CU0, CV0) in flash.
+  Heading.R0 = 0.117;     // m, what both 2026-10-07 logs learned (the old 0.090 + 0.032 trim gave 0.122)
+  Heading.A_OFF = 13.0;   // m/s2, accel Z sitting still
+  Heading.CU0 = 6.4;      // uT, mag circle center at cruise power
+  Heading.CV0 = 2.4;      // uT
+  Heading.B_NOM = 19.7;   // uT, in-plane field size
+  Heading.begin();
 
   pinMode(PIN_STATUS_LED, OUTPUT);
   pinMode(PIN_MELTY_LED, OUTPUT);
@@ -79,7 +114,13 @@ void setup() {
 
   Serial.begin(115200);
 
-  // Started before the sensors so a sensor problem can't keep the robot off the viewer
+  // Started before the sensors so a sensor problem can't keep the robot off the viewer.
+  // 200 frames/s instead of one per loop (~875/s) and a 6 Mbps radio rate: about a
+  // tenth of the airtime, so the link keeps a multi-second buffer and the adaptive
+  // fallback rates (down to LR) stay available in a noisy arena. The heading filter
+  // itself still runs every loop; only the log is decimated.
+  Telemetry.setMaxRate(200);
+  Telemetry.setRadioRate(WIFI_PHY_RATE_6M);
   Telemetry.begin("Rotini");
 
   crsfSerial.begin(CRSF_BAUDRATE, SERIAL_8N1, PIN_CRSF_RX, PIN_CRSF_TX);
@@ -89,8 +130,16 @@ void setup() {
 
   accelerometer.setSPICSPin(PIN_ACCELEROMETER_CS);
   accelerometer.begin(LIS331::USE_SPI);  // Selects the bus to be used
-  accelerometer.setODR(accelerometer.DR_1000HZ);
+  accelerometer.setODR(accelerometer.DR_400HZ);  // also sets the chip's low-pass to 292 Hz
   accelerometer.setFullScale(accelerometer.HIGH_RANGE);  //400g range
+  // Data-ready on INT1, active high, push-pull. intSrcConfig() clears the rest
+  // of CTRL_REG3 (a library quirk), so it goes first.
+  accelerometer.intSrcConfig(LIS331::DRDY, 1);
+  accelerometer.intActiveHigh(true);
+  accelerometer.intPinMode(LIS331::PUSH_PULL);
+  pinMode(PIN_ACCELEROMETER_INT, INPUT);
+  attachInterrupt(digitalPinToInterrupt(PIN_ACCELEROMETER_INT), accelISR, RISING);
+  accel_ready = true;  // DRDY may already be high; the first read clears it
 
   mag_ok = beginMag();
 
@@ -161,22 +210,40 @@ void loop() {
     Rotini.drive_mode = NO_CONNECTION;
   }
 
-  // Reads the accelerometer every pass so telemetry has it in every drive mode
-  int16_t accel_x, accel_y, accel_z;
-  accelerometer.readAxes(accel_x, accel_y, accel_z);
-  Telemetry.add("accel_x", LIS331_to_mps2(accel_x));  // m/s^2
-  Telemetry.add("accel_y", LIS331_to_mps2(accel_y));
-  Telemetry.add("accel_z", LIS331_to_mps2(accel_z));
+  // Reads the accelerometer once per new sample (DRDY interrupt), in every
+  // drive mode. The read clears DRDY. Between samples the last values hold.
+  static int16_t accel_x = 0, accel_y = 0, accel_z = 0;
+  static uint32_t last_accel_us = 0;
+  if (accel_ready || micros() - last_accel_us > SENSOR_TIMEOUT_US) {
+    accel_ready = false;
+    last_accel_us = micros();
+    accelerometer.readAxes(accel_x, accel_y, accel_z);
+    Telemetry.add("accel_x", LIS331_to_mps2(accel_x));  // m/s^2
+    Telemetry.add("accel_y", LIS331_to_mps2(accel_y));
+    Telemetry.add("accel_z", LIS331_to_mps2(accel_z));
+  }
 
-  float mag_x, mag_y, mag_z;
-  if (mag_ok && updateMag(mag_x, mag_y, mag_z)) {
+  float mag_x = 0, mag_y = 0, mag_z = 0;
+  bool mag_fresh = mag_ok && updateMag(mag_x, mag_y, mag_z);
+  loop_count++;
+  if (mag_fresh) {
+    mag_fresh_count++;
     Telemetry.add("mag_x", mag_x);  // uT
     Telemetry.add("mag_y", mag_y);
     Telemetry.add("mag_z", mag_z);
   }
 
+  // Heading estimate, every loop in every mode (the compass holds it while parked)
+  static uint32_t last_heading_us = micros();
+  uint32_t now_us = micros();
+  float heading_dt = (now_us - last_heading_us) * 0.000001f;
+  last_heading_us = now_us;
+  if (heading_dt > 0.5f) heading_dt = 0;  // first loop or a stall: skip the step
+  int spin_dir = (Rotini.reversed ? -1 : 1) * MAG_SPIN_SIGN;
+  Heading.update(heading_dt, LIS331_to_mps2(accel_z), mag_fresh, mag_x, mag_y, mag_z, spin_dir);
+
   if (Rotini.drive_mode == MELTY) {
-	// Passes the accelerometer info to the Rotini object
+	// Accelerometer info for the accelerometer-only fallback (meltyStateUpdate)
     Rotini.accelerometer_x = 0; // LIS331_to_mps2(accel_x);
     Rotini.accelerometer_y = 0; // LIS331_to_mps2(accel_y);
     Rotini.accelerometer_z = LIS331_to_mps2(accel_z);
@@ -199,15 +266,10 @@ void loop() {
     else if (SWD_forward.is_held())
       Rotini.reversed = true;
 
-	// SWB has three states, the state of SWB controls what certain trim buttons do
-    if (SWB_backward.is_held()) {  // trims accel radius
-      if (left_left_arrow.just_pressed())
-        Rotini.radius_trim += 0.002;  // 2 mm
-      else if (left_right_arrow.just_pressed())
-        Rotini.radius_trim -= 0.002;  // 2 mm
-      else if (left_up_arrow.is_held())
-        Rotini.radius_trim = 0;
-    } else if (SWB_neutral.is_held()) {  // middle pos trims led offset
+	// SWB has three states, the state of SWB controls what certain trim buttons do.
+	// The back position used to trim the accel radius; the HeadingEstimator learns
+	// the radius itself, so that position is free now.
+    if (SWB_neutral.is_held()) {  // middle pos trims led offset
       if (left_left_arrow.just_pressed())
         Rotini.melty_led_offset_CW += 0.1;  // 0.1 radians = 5.729 degrees
       else if (left_right_arrow.just_pressed())
@@ -223,7 +285,8 @@ void loop() {
         Rotini.melty_led_offset_CCW = 0.698132 - 0.09 * 6.0;
     }
 
-    Rotini.meltyStateUpdate();
+    if (USE_HEADING_ESTIMATOR) Rotini.meltyHeadingStateUpdate(Heading.theta);
+    else Rotini.meltyStateUpdate();
 
   } else if (Rotini.drive_mode == ARCADE) {
     Rotini.arcadeStateUpdate();
@@ -271,6 +334,15 @@ void loop() {
 
   Telemetry.add("drive_mode", Rotini.drive_mode);
   Telemetry.add("heading", Rotini.angle * RAD_TO_DEG);  // 0..360, only updates in melty mode
+  // Heading estimator internals: enough to replay the filter offline
+  Telemetry.add("est_heading", Heading.theta * RAD_TO_DEG);     // 0..360, every mode
+  Telemetry.add("est_mag_heading", Heading.thetaMag * RAD_TO_DEG);
+  Telemetry.add("est_innov", Heading.e * RAD_TO_DEG);           // compass minus estimate at the last fix
+  Telemetry.add("est_omega", Heading.w);                        // rad/s
+  Telemetry.add("est_r_mm", Heading.r * 1000);                  // learned radius
+  Telemetry.add("est_cu", Heading.cu);                          // learned circle center, uT
+  Telemetry.add("est_cv", Heading.cv);
+  Telemetry.add("est_mag_ok", Heading.accepted ? 1 : 0);        // last fix passed gate 1
   Telemetry.add("motor_foo", Rotini.motor_power_foo);  // -1..1, 0 is stop
   Telemetry.add("motor_bar", Rotini.motor_power_bar);
   // Shaft rpm from the ESC's DShot reply; a gap while it isn't answering
@@ -285,6 +357,20 @@ void loop() {
     printMotor("foo", foo);
     printMotor("bar", bar);
     if (!mag_ok) Serial.println("magnetometer: not found");
+    // Expect about 415 and 618 (see beginMag). 0 means that INT line isn't
+    // reaching the ESP and the sensor is being polled at 100 Hz instead.
+    static uint32_t accel_int_last = 0, mag_int_last = 0, mag_fresh_last = 0, mag_stale_last = 0, loop_last = 0;
+    Serial.printf("sensor interrupts: accel %lu/s, mag %lu/s (fresh %lu, stale %lu) | loop %lu/s\n",
+                  (unsigned long)(accel_int_count - accel_int_last),
+                  (unsigned long)(mag_int_count - mag_int_last),
+                  (unsigned long)(mag_fresh_count - mag_fresh_last),
+                  (unsigned long)(mag_stale_count - mag_stale_last),
+                  (unsigned long)(loop_count - loop_last));
+    accel_int_last = accel_int_count;
+    mag_int_last = mag_int_count;
+    mag_fresh_last = mag_fresh_count;
+    mag_stale_last = mag_stale_count;
+    loop_last = loop_count;
     last_status_ms = millis();
   }
 }
@@ -353,21 +439,35 @@ bool beginMag() {
 
   magnetometer.setFilterBandwidth(800);
   magnetometer.setContinuousModeFrequency(MAG_RATE_HZ);
+  // Auto SET/RESET halves the output rate: the chip takes a SET and a RESET
+  // measurement per sample to cancel its own offset. Measured 2026-10-08 on
+  // Rotini V4 at the 1000 Hz setting: 618 samples/s with it, 1234/s without.
   magnetometer.enableAutomaticSetReset();
   magnetometer.enableContinuousMode();
+
+  // Measurement-done interrupt; cleared in updateMag() before each read
+  magnetometer.enableInterrupt();
+  pinMode(PIN_MAGNETOMETER_INT, INPUT);
+  attachInterrupt(digitalPinToInterrupt(PIN_MAGNETOMETER_INT), magISR, RISING);
+  mag_ready = true;  // in case the first edge came before attachInterrupt
   return true;
 }
 
-// PIN_MAGNETOMETER_INT is the same pin as the CS, so the interrupt can't be
-// used; this reads the latest sample once per continuous mode period instead.
-// Returns true with the field in uT (full scale is +/-8 G = 800 uT).
+// Reads the magnetometer once per measurement-done interrupt. Returns true
+// only for a NEW sample, with the field in uT (full scale +/-8 G = 800 uT).
+// The stale check stays as a guard for the timeout fallback.
 bool updateMag(float &x, float &y, float &z) {
   static uint32_t last_read_us = 0;
-  if (micros() - last_read_us < 1000000UL / MAG_RATE_HZ) return false;
+  static uint32_t prev_x = 0, prev_y = 0, prev_z = 0;
+  if (!mag_ready && micros() - last_read_us < SENSOR_TIMEOUT_US) return false;
+  mag_ready = false;
   last_read_us = micros();
 
   uint32_t raw_x, raw_y, raw_z;
+  magnetometer.clearMeasDoneInterrupt();  // re-arms the INT line for the next sample
   if (!magnetometer.readFieldsXYZ(&raw_x, &raw_y, &raw_z)) return false;
+  if (raw_x == prev_x && raw_y == prev_y && raw_z == prev_z) { mag_stale_count++; return false; }  // stale sample
+  prev_x = raw_x; prev_y = raw_y; prev_z = raw_z;
   x = ((float)raw_x - 131072.0f) / 131072.0f * 800.0f;
   y = ((float)raw_y - 131072.0f) / 131072.0f * 800.0f;
   z = ((float)raw_z - 131072.0f) / 131072.0f * 800.0f;
