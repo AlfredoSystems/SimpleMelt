@@ -6,7 +6,7 @@
 #include "SimpleMeltUtility.h"
 
 #include "AlfredoCRSF.h"
-#include "SparkFun_LIS331.h"
+#include <AlfredoFusion.h>  // H3LIS331 accelerometer driver
 
 const int PIN_SPI_SCK = 17;
 const int PIN_SPI_MISO = 1;
@@ -29,7 +29,7 @@ SimpleMelt Rotini;
 HardwareSerial crsfSerial(1);
 AlfredoCRSF crsf;
 
-LIS331 accelerometer;
+AlfredoH3LIS accelerometer;
 
 OneShot125 foo;
 OneShot125 bar;
@@ -58,10 +58,8 @@ void setup() {
 
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
 
-  accelerometer.setSPICSPin(PIN_ACCELEROMETER_CS);
-  accelerometer.begin(LIS331::USE_SPI);  // Selects the bus to be used
-  accelerometer.setODR(accelerometer.DR_1000HZ);
-  accelerometer.setFullScale(accelerometer.HIGH_RANGE);  //400g range
+  accelerometer.begin(SPI, PIN_ACCELEROMETER_CS);
+  accelerometer.configure(1000, 400);  // 1000 Hz, +/-400 g
 
   foo.begin(PIN_MOTOR_FOO, 0);
   bar.begin(PIN_MOTOR_BAR, 1);
@@ -129,11 +127,11 @@ void loop() {
 
   if (Rotini.drive_mode == MELTY) {
 	// Reads the accelerometer and passes that info to the Rotini object
-    int16_t x, y, z;
-    accelerometer.readAxes(x, y, z);
-    Rotini.accelerometer_x = 0; // LIS331_to_mps2(x);
-    Rotini.accelerometer_y = 0; // LIS331_to_mps2(y);
-    Rotini.accelerometer_z = LIS331_to_mps2(z);
+    float x = 0, y = 0, z = 0;
+    accelerometer.read(x, y, z);  // g
+    Rotini.accelerometer_x = 0; // x * 9.80665f;
+    Rotini.accelerometer_y = 0; // y * 9.80665f;
+    Rotini.accelerometer_z = z * 9.80665f;
 
 	// Spin_power is the average power that motors are set to.
     if (right_bumper.just_pressed())
@@ -207,11 +205,6 @@ void loop() {
 }
 
 //////////////////// Helper functions ////////////////////////////////////////////////////////////////////
-
-float LIS331_to_mps2(int16_t native_units) {
-  // TODO: This is only correct in 400g mode. Should update when scale changes.
-  return ((400.0f * native_units) / 2047.0f) * 9.80665f;
-}
 
 float channel_to_axis(unsigned int channel) {
   float axis = min(1.f, max(-1.f, (crsf.getChannel(channel) / 500.f) - 3));  // Map 1000-2000 channel value to -1..1

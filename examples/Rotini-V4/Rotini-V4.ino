@@ -7,11 +7,9 @@
 #include "HeadingEstimator.h"
 
 #include "AlfredoCRSF.h"
-#include "SparkFun_LIS331.h"
 #include <AlfredoDShot.h>
 #include <AlfredoTelemetry.h>
-
-#include "mmc.h"
+#include <AlfredoFusion.h>  // H3LIS331 accelerometer + MMC5983MA magnetometer drivers
 
 const int PIN_SPI_SCK = 6;
 const int PIN_SPI_MISO = 7;
@@ -33,13 +31,13 @@ SimpleMelt Rotini;
 HardwareSerial crsfSerial(1);
 AlfredoCRSF crsf;
 
-LIS331 accelerometer;
+AlfredoH3LIS accelerometer;
 
-SFE_MMC5983MA magnetometer;
+AlfredoMMC5983 magnetometer;
 const uint16_t MAG_RATE_HZ = 1000;  // continuous mode rate: 1000, 200, 100, 50, 20, 10 or 1
 bool mag_ok = false;
 
-// Both sensors raise an INT line when a new sample is ready (LIS331 DRDY on
+// Both sensors raise an INT line when a new sample is ready (H3LIS331 DRDY on
 // INT1, MMC5983MA measurement-done). The ISRs only set a flag; the SPI reads
 // happen in loop(). If an INT line never fires (wrong pin, or GPIO 36/37 taken
 // by octal PSRAM), the read falls back to a slow poll after SENSOR_TIMEOUT_US
@@ -90,16 +88,16 @@ void setup() {
   Rotini.melty_led_offset_CW = 2.22;     // radians (CCW is positive)
   Rotini.melty_led_offset_CCW = 4.02;    // radians (CCW is positive)
   Rotini.turn_speed = 1.1;              // rotations per second
-  Rotini.accelerometer_radius = 0.122;  // meters, accelerometer-only fallback only (was 0.090 + 0.032 trim)
+  Rotini.accelerometer_radius = 0.118;  // meters, accelerometer-only fallback only (was 0.090 + 0.032 trim)
 
-  // Calibration from the 2026-10-07 logs; the estimator learns r and the circle
-  // center from here. A_OFF is the one value it cannot learn: TODO measure it on
-  // the floor automatically and keep it (with r, CU0, CV0) in flash.
-  Heading.R0 = 0.117;     // m, what both 2026-10-07 logs learned (the old 0.090 + 0.032 trim gave 0.122)
-  Heading.A_OFF = 13.0;   // m/s2, accel Z sitting still
+  // Start values, measured from the 2026-10-07/08 logs. The estimator learns the
+  // radius and the circle center while spinning and the accel offset while parked,
+  // so these only shape the first second; the mag center is a body property
+  // (the robot's own magnets) and B_NOM is the local horizontal Earth field.
+  Heading.R0 = 0.117;     // m, what the logs learned (the old 0.090 + 0.032 trim gave 0.122)
   Heading.CU0 = 6.4;      // uT, mag circle center at cruise power
   Heading.CV0 = 2.4;      // uT
-  Heading.B_NOM = 19.7;   // uT, in-plane field size
+  Heading.B_NOM = 19.7;   // uT, in-plane field size while spinning (gate 1 compares against it)
   Heading.begin();
 
   pinMode(PIN_STATUS_LED, OUTPUT);
@@ -128,15 +126,11 @@ void setup() {
 
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
 
-  accelerometer.setSPICSPin(PIN_ACCELEROMETER_CS);
-  accelerometer.begin(LIS331::USE_SPI);  // Selects the bus to be used
-  accelerometer.setODR(accelerometer.DR_400HZ);  // also sets the chip's low-pass to 292 Hz
-  accelerometer.setFullScale(accelerometer.HIGH_RANGE);  //400g range
-  // Data-ready on INT1, active high, push-pull. intSrcConfig() clears the rest
-  // of CTRL_REG3 (a library quirk), so it goes first.
-  accelerometer.intSrcConfig(LIS331::DRDY, 1);
-  accelerometer.intActiveHigh(true);
-  accelerometer.intPinMode(LIS331::PUSH_PULL);
+  if (!accelerometer.begin(SPI, PIN_ACCELEROMETER_CS)) {
+    Serial.println("H3LIS331 did not respond");
+  }
+  accelerometer.configure(400, 400);  // 400 Hz (chip low-pass 292 Hz), +/-400 g
+  accelerometer.enableInterrupt();    // data-ready on INT1, active high, push-pull
   pinMode(PIN_ACCELEROMETER_INT, INPUT);
   attachInterrupt(digitalPinToInterrupt(PIN_ACCELEROMETER_INT), accelISR, RISING);
   accel_ready = true;  // DRDY may already be high; the first read clears it
@@ -212,15 +206,20 @@ void loop() {
 
   // Reads the accelerometer once per new sample (DRDY interrupt), in every
   // drive mode. The read clears DRDY. Between samples the last values hold.
-  static int16_t accel_x = 0, accel_y = 0, accel_z = 0;
+  static float accel_x = 0, accel_y = 0, accel_z = 0;  // m/s^2
   static uint32_t last_accel_us = 0;
   if (accel_ready || micros() - last_accel_us > SENSOR_TIMEOUT_US) {
     accel_ready = false;
     last_accel_us = micros();
-    accelerometer.readAxes(accel_x, accel_y, accel_z);
-    Telemetry.add("accel_x", LIS331_to_mps2(accel_x));  // m/s^2
-    Telemetry.add("accel_y", LIS331_to_mps2(accel_y));
-    Telemetry.add("accel_z", LIS331_to_mps2(accel_z));
+    float gx, gy, gz;
+    if (accelerometer.read(gx, gy, gz)) {  // g
+      accel_x = gx * 9.80665f;
+      accel_y = gy * 9.80665f;
+      accel_z = gz * 9.80665f;
+    }
+    Telemetry.add("accel_x", accel_x);  // m/s^2
+    Telemetry.add("accel_y", accel_y);
+    Telemetry.add("accel_z", accel_z);
   }
 
   float mag_x = 0, mag_y = 0, mag_z = 0;
@@ -240,13 +239,14 @@ void loop() {
   last_heading_us = now_us;
   if (heading_dt > 0.5f) heading_dt = 0;  // first loop or a stall: skip the step
   int spin_dir = (Rotini.reversed ? -1 : 1) * MAG_SPIN_SIGN;
-  Heading.update(heading_dt, LIS331_to_mps2(accel_z), mag_fresh, mag_x, mag_y, mag_z, spin_dir);
+  bool motors_off = Rotini.motor_power_foo == 0 && Rotini.motor_power_bar == 0;  // the offset is learned only then
+  Heading.update(heading_dt, accel_z, mag_fresh, mag_x, mag_y, mag_z, spin_dir, motors_off);
 
   if (Rotini.drive_mode == MELTY) {
 	// Accelerometer info for the accelerometer-only fallback (meltyStateUpdate)
-    Rotini.accelerometer_x = 0; // LIS331_to_mps2(accel_x);
-    Rotini.accelerometer_y = 0; // LIS331_to_mps2(accel_y);
-    Rotini.accelerometer_z = LIS331_to_mps2(accel_z);
+    Rotini.accelerometer_x = 0; // accel_x;
+    Rotini.accelerometer_y = 0; // accel_y;
+    Rotini.accelerometer_z = accel_z;
 
 	// Spin_power is the average power that motors are set to.
     if (right_bumper.just_pressed())
@@ -342,6 +342,7 @@ void loop() {
   Telemetry.add("est_r_mm", Heading.r * 1000);                  // learned radius
   Telemetry.add("est_cu", Heading.cu);                          // learned circle center, uT
   Telemetry.add("est_cv", Heading.cv);
+  Telemetry.add("est_a_off", Heading.aOff);                     // learned accel Z offset, m/s2
   Telemetry.add("est_mag_ok", Heading.accepted ? 1 : 0);        // last fix passed gate 1
   Telemetry.add("motor_foo", Rotini.motor_power_foo);  // -1..1, 0 is stop
   Telemetry.add("motor_bar", Rotini.motor_power_bar);
@@ -424,28 +425,23 @@ void printMotor(const char *name, AlfredoDShot &esc) {
 // Gives up after a few tries so a missing magnetometer doesn't stop the robot from starting
 bool beginMag() {
   int tries = 0;
-  while (magnetometer.begin(PIN_MAGNETOMETER_CS) == false) {
+  while (magnetometer.begin(SPI, PIN_MAGNETOMETER_CS) == false) {
     if (++tries >= 5) {
       Serial.println("MMC5983MA did not respond, running without it");
       return false;
     }
     Serial.println("MMC5983MA did not respond. Retrying...");
-    delay(500);
-    magnetometer.softReset();
-    delay(500);
+    delay(1000);
   }
-  magnetometer.softReset();
   Serial.println("MMC5983MA connected");
 
-  magnetometer.setFilterBandwidth(800);
-  magnetometer.setContinuousModeFrequency(MAG_RATE_HZ);
-  // Auto SET/RESET halves the output rate: the chip takes a SET and a RESET
-  // measurement per sample to cancel its own offset. Measured 2026-10-08 on
-  // Rotini V4 at the 1000 Hz setting: 618 samples/s with it, 1234/s without.
-  magnetometer.enableAutomaticSetReset();
-  magnetometer.enableContinuousMode();
+  // Continuous mode, 800 Hz bandwidth. Auto SET/RESET halves the output
+  // rate: the chip takes a SET and a RESET measurement per sample to cancel
+  // its own offset. Measured 2026-10-08 on Rotini V4 at the 1000 Hz setting:
+  // 618 samples/s with it, 1234/s without.
+  magnetometer.configure(MAG_RATE_HZ, 800, true);
 
-  // Measurement-done interrupt; cleared in updateMag() before each read
+  // Measurement-done interrupt; read() clears it before each read
   magnetometer.enableInterrupt();
   pinMode(PIN_MAGNETOMETER_INT, INPUT);
   attachInterrupt(digitalPinToInterrupt(PIN_MAGNETOMETER_INT), magISR, RISING);
@@ -464,8 +460,8 @@ bool updateMag(float &x, float &y, float &z) {
   last_read_us = micros();
 
   uint32_t raw_x, raw_y, raw_z;
-  magnetometer.clearMeasDoneInterrupt();  // re-arms the INT line for the next sample
-  if (!magnetometer.readFieldsXYZ(&raw_x, &raw_y, &raw_z)) return false;
+  // readRaw() clears the measurement-done flag first, re-arming the INT line
+  if (!magnetometer.readRaw(raw_x, raw_y, raw_z)) return false;
   if (raw_x == prev_x && raw_y == prev_y && raw_z == prev_z) { mag_stale_count++; return false; }  // stale sample
   prev_x = raw_x; prev_y = raw_y; prev_z = raw_z;
   x = ((float)raw_x - 131072.0f) / 131072.0f * 800.0f;
@@ -475,11 +471,6 @@ bool updateMag(float &x, float &y, float &z) {
 }
 
 //////////////////// Helper functions ////////////////////////////////////////////////////////////////////
-
-float LIS331_to_mps2(int16_t native_units) {
-  // TODO: This is only correct in 400g mode. Should update when scale changes.
-  return ((400.0f * native_units) / 2047.0f) * 9.80665f;
-}
 
 float channel_to_axis(unsigned int channel) {
   float axis = min(1.f, max(-1.f, (crsf.getChannel(channel) / 500.f) - 3));  // Map 1000-2000 channel value to -1..1

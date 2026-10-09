@@ -18,13 +18,16 @@
  *      while spinning: learn r (a steady lag means r is wrong) and the circle center
  *   5  theta is the heading, [0, 2pi)
  *
- * Saved between loops (the whole state): theta, wPrev, r, cu, cv.
+ * Saved between loops (the whole state): theta, wPrev, r, cu, cv, aOff, and the okRun counter.
+ * r, cu, cv and aOff are the calibration: they belong in flash between runs.
  */
 class HeadingEstimator {
   public:
     // ---- constants: calibration (measured) ----
     float R0    = 0.122;   // m     start radius (old accelerometer_radius + radius_trim); r learns from here
-    float A_OFF = 13.0;    // m/s2  accel Z when the robot sits on the floor. TODO: measure automatically, keep in flash
+    float A_OFF = 0;       // m/s2  accel Z sitting flat on the floor: START value only. It drifts between
+                           //       sessions (+13 one day, -4 the next), so it is learned, see aOff. TODO: keep in flash
+    float TAU_OFF = 10;    // s     how long the robot must sit (motors off, fix in band) to trust a new offset
     float CU0   = 6.4;     // uT    mag circle center at cruise power, u = (mx+my)/sqrt2.  TODO: keep in flash
     float CV0   = 2.4;     // uT    mag circle center, v = mz
     float B_NOM = 19.7;    // uT    in-plane field size while spinning
@@ -37,6 +40,9 @@ class HeadingEstimator {
     float E0       = 0.7854;     // rad (45 deg)  gate 2: surprises above this get weight 1/(1+(e/E0)^2)
     float W_MIN    = 0.15;       //               floor on that weight, so a wrong heading still converges
     float MIN_SPIN = 15;         // rad/s         below this: no learning (the mag still corrects the heading)
+    int   LEARN_AFTER = 10;      // fixes         r and the center only move after this many consecutive accepted
+                                 //               fixes: during a rejection streak (motor field at high throttle,
+                                 //               a nearby robot) the fixes that pass can be the wrong angle
     float DT_FIX   = 1.0 / 600;  // s             nominal interval between compass fixes. Every accepted fix
                                  //               pulls the same fraction DT_FIX/(tau+DT_FIX): no timer, no
                                  //               catch-up, missing and rejected samples behave the same
@@ -47,6 +53,8 @@ class HeadingEstimator {
     float r     = 0;   // m     learned accelerometer radius
     float cu    = 0;   // uT    mag circle center, u
     float cv    = 0;   // uT    mag circle center, v
+    float aOff  = 0;   // m/s2  accel Z offset, learned while parked flat (motors off, fix in band)
+    int   okRun = 0;   //       consecutive accepted fixes (0 after any rejection)
 
     // ---- outputs of the last update(), for telemetry ----
     float w = 0;            // rad/s signed spin rate used this loop
@@ -59,8 +67,9 @@ class HeadingEstimator {
     void begin();  // loads the state from the calibration constants
 
     // dt in s, accel_z in m/s2, mag in uT, magFresh = true only when mx/my/mz is a NEW sample,
-    // dir = +1 or -1: the sign of the robot's rotation as the compass heading sees it.
-    void update(float dt, float accel_z, bool magFresh, float mx, float my, float mz, int dir);
+    // dir = +1 or -1: the sign of the robot's rotation as the compass heading sees it,
+    // motorsOff = true when both motors are commanded to zero (the offset is learned then).
+    void update(float dt, float accel_z, bool magFresh, float mx, float my, float mz, int dir, bool motorsOff);
 
     static float wrapPi(float a);   // (-pi, pi]
     static float wrap2Pi(float a);  // [0, 2pi)

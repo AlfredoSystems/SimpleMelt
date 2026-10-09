@@ -19,11 +19,13 @@ void HeadingEstimator::begin() {
   r = R0;
   cu = CU0;
   cv = CV0;
+  aOff = A_OFF;
+  okRun = 0;
 }
 
-void HeadingEstimator::update(float dt, float accel_z, bool magFresh, float mx, float my, float mz, int dir) {
+void HeadingEstimator::update(float dt, float accel_z, bool magFresh, float mx, float my, float mz, int dir, bool motorsOff) {
   // STEP 1 — spin rate from the accelerometer.  a = w^2 r  ->  w = sqrt(a / r)
-  float a = accel_z - A_OFF;
+  float a = accel_z - aOff;
   if (a < 0) a = 0;
   float wAbs = sqrtf(a / r);
   w = dir * wAbs;
@@ -49,7 +51,13 @@ void HeadingEstimator::update(float dt, float accel_z, bool magFresh, float mx, 
     float k = DT_FIX / (tau + DT_FIX) * wgt;
     theta = wrap2Pi(theta + k * e);
     accepted = true;
-    if (wAbs > MIN_SPIN) {
+    okRun++;
+    // The accel offset is observable only parked flat: motors off, not coasting (motors off while
+    // still spinning is not parked), and the fix in band (a robot tilted in the hand leaks the
+    // vertical field into the plane and fails gate 1).
+    if (motorsOff && wAbs < MIN_SPIN) aOff += (accel_z - aOff) * dt / TAU_OFF;
+    // learn only while spinning and only once the mag has been clean for LEARN_AFTER fixes
+    if (wAbs > MIN_SPIN && okRun >= LEARN_AFTER) {
       // Heading lagging the compass (e > 0 with dir = +1) means the rate is too low -> r too big.
       // w ~ 1/sqrt(r), hence the 2 and the "* r".
       r -= 2.0f * K_R * dir * e * wgt * DT_FIX * r;
@@ -61,5 +69,7 @@ void HeadingEstimator::update(float dt, float accel_z, bool magFresh, float mx, 
       cu += kc * u;
       cv += kc * v;
     }
+  } else {
+    okRun = 0;   // a rejection resets the streak
   }
 }
