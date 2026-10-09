@@ -1,0 +1,37 @@
+#######################################
+# Syntax Coloring Map For SimpleMelt
+#######################################
+
+#######################################
+# Datatypes (KEYWORD1)
+#######################################
+
+MeltyDrive	KEYWORD1
+HeadingEstimator	KEYWORD1
+Button	KEYWORD1
+RotiniV4	KEYWORD1
+DriveMode	KEYWORD1
+
+#######################################
+# Methods and Functions (KEYWORD2)
+#######################################
+
+update	KEYWORD2
+begin	KEYWORD2
+setMotors	KEYWORD2
+setLeds	KEYWORD2
+printStatus	KEYWORD2
+is_held	KEYWORD2
+just_pressed	KEYWORD2
+just_released	KEYWORD2
+wrapPi	KEYWORD2
+wrap2Pi	KEYWORD2
+
+#######################################
+# Constants (LITERAL1)
+#######################################
+
+NO_CONNECTION	LITERAL1
+STOP	LITERAL1
+ARCADE	LITERAL1
+MELTY	LITERAL1
