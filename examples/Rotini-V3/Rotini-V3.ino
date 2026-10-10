@@ -62,7 +62,9 @@ void setup() {
   drive.led_offset_cw = 2.22;   // rad
   drive.led_offset_ccw = 4.02;  // rad
   drive.turn_speed = 1.1;       // rev/s
-  drive.spin_lead = 1;          // no slip limit: it has not been measured for this robot's motors
+  drive.arcade_power = 0.2;     // top speed in arcade (tank) mode, 0..1
+  drive.arcade_deadband = 0.1;  // stick travel ignored in arcade mode
+  drive.spin_push = 1;          // no slip limit: it has not been measured for this robot's motors
 
   // The estimator learns the radius and the mag circle center while spinning
   // and the accel offset while parked. R0 is the V3's radius from the 1.x
@@ -125,6 +127,7 @@ void readController() {
   if (right_ud.is(UP) || right_ud.is(DOWN)) drive.spin_power = 0;
   else if (right_lr.is(DOWN) || right_lr.movedFrom(UP)) drive.spin_power = 0.18;  // cruise
   else if (right_lr.is(UP)) drive.spin_power = 1;                                 // to get going, out of pins, or hit harder
+  drive.spin_unlimited = right_lr.is(UP);  // and straight to the motors, no slip limit
 
   drive.reversed = direction_switch.is(UP);
 

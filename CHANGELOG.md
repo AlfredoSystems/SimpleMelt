@@ -28,20 +28,22 @@ the examples. Sketches written for 1.x need updating.
 - `MeltyDrive` has a slip limit. A step in spin power used to put the wheels at
   their commanded speed in milliseconds while the body took seconds to follow,
   sliding the tread the whole way (55 m per wheel on one full-power spin-up of
-  Rotini V4). With `spin_rate` and `battery` supplied, the
-  spin command is now `min(spin_power, roll_volts * spin_rate / battery +
-  spin_lead)`: the command that rolls the wheels at the body's speed, plus a
-  lead that does the pushing. It acts on spin-up, after a hit, in a pin and on
-  a restart while still turning, and never raises the command above
-  `spin_power`. Setting `spin_lead` to 1 switches the limit off.
-  The translation waveform is applied to the limited command afterwards.
+  Rotini V4). With `spin_rate` and `battery` supplied, the spin command is now
+  the command that rolls the wheels at the body's speed, `volts_per_rad_s *
+  spin_rate / battery`, plus `spin_push`, which does the pushing. `spin_power`
+  is read as a target speed, `spin_power * battery / volts_per_rad_s`: the full lead
+  is kept until the body is within `spin_push_fade_rad_s` of it, so the push does not tail
+  off on the way up, and the command sits above `spin_power` by up to the lead
+  while the body is below target. The limit acts on spin-up, after a hit, in a
+  pin and on a restart while still turning. Setting `spin_push` to 1 switches
+  it off. The translation waveform is applied to the limited command afterwards.
 - A direction change while spinning no longer reverses the motors at full
   command. The drive brakes with the wheels just below rolling speed, carries
   the body through zero, and only then reports the new direction in
   `turning_reversed`, which is what the heading estimator should be given.
-- The Rotini V4 example logs `spin_power`, `spin_cmd`, `spin_roll` and
-  `spin_flip`, and exposes `spin_lead` and `roll_volts` as live
-  tunables.
+- The Rotini V4 example logs `spin_power`, `spin_power_sent`, `spin_power_rolling`,
+  `spin_target_rad_s` and `spin_reversing`, and exposes `spin_push`, `volts_per_rad_s` and
+  `spin_push_fade_rad_s` as live tunables, which it also logs.
 
 ## 1.0.0
 

@@ -133,11 +133,11 @@ per wheel: wheel surface speed minus rolling speed, added up over the event.
 - Rolling: 51 wheel rpm per rad/s of body spin. Geometry and logs agree.
 - No-load wheel speed: about 20,000 rpm per unit of command at 17 V. The
   660 KV in the ESC config is not what the motor does.
-- Steady spin: `spin_cmd * vin / est_omega` = 0.0447 V per rad/s (0.043 to
-  0.048 between 35 and 85 rad/s). This is `roll_volts`.
+- Steady spin: `spin_power_sent * vin / est_omega` = 0.0447 V per rad/s (0.043 to
+  0.048 between 35 and 85 rad/s). This is `volts_per_rad_s`.
 - Accelerating with grip: `volts = 0.0447 * omega + 0.0408 * alpha`. A command
   0.05 above the rolling command gives about 20 rad/s2 with the wheels 5 to
-  10 % above rolling speed. This is `spin_lead`.
+  10 % above rolling speed. This is `spin_push`.
 - Grip: the body accelerates at 20 to 27 rad/s2 whether the wheels grip or
   slide at 1 to 10 m/s. Only a full-power burnout, 35 to 40 m/s of slip, gives
   more: 35 to 43 rad/s2.
@@ -160,38 +160,109 @@ back to 80 % speed. 6 to 14 m of tread per hit at cruise, 36 m for the one hit
 at full power. A timed ramp cannot see a hit or a pin, and it blunts the
 full-power switch (16 s from cruise to full at 0.05 per second).
 
+### On the robot, after balancing (2026-10-09, late)
+
+The first feed-forward runs were on a poorly balanced robot: above 70 rad/s the
+bar wheel ran 13 to 23 % over rolling speed while foo did the work, and full
+power took 7.9 s to reach 100 rad/s. An off-centre mass loads the wheels
+unevenly with a force that grows as speed squared. Balance the robot before
+tuning anything here. Everything below is from the balanced robot.
+
+- Steady spin: 0.0402 to 0.0409 V per rad/s (74 to 75 rad/s at spin power 0.18
+  and 16.7 V). `volts_per_rad_s` is 0.0405.
+- The knee, from full-power spin-ups with `volts_per_rad_s` at the old 0.0447, which
+  adds about 0.015 of hidden lead at 60 rad/s:
+
+  | `spin_push` as set | Push, 40 to 100 rad/s | 60 rad/s in | Tread slid to 60 | Wheels vs rolling |
+  |---|---|---|---|---|
+  | 0.05 | 22 to 25 rad/s2 | 2.83 s | 1.5 m | 1.09 |
+  | 0.06 | 25 to 29 rad/s2 | 2.50 s | 1.8 m | 1.15 |
+  | 0.10 | 25 to 29 rad/s2 | 2.48 s | 5.6 m | 1.25 to 1.55 |
+
+  Past 0.06 the push does not rise and the slip triples. With `volts_per_rad_s`
+  corrected that knee is a lead of about 0.07.
+- With spin power as a plain cap the push faded on the way to cruise: 26 rad/s2
+  at 45 rad/s, 15 at 57, 8 at 65, 2 at 75. 50 rad/s came in 2.3 s but 75 took
+  5.4 s. That is what `spin_push_fade_rad_s` fixes.
+- Direction change at cruise: 5.3 s of braking from 69 to 20 rad/s with the
+  wheels at 0.93 of rolling speed, 0.75 s through zero, and 68 rad/s the other
+  way 10.4 s after the switch. Heading error stayed between 5 and 17 degrees.
+
 ### What the firmware does
 
-`MeltyDrive` holds the spin command to the rolling command for the measured
-spin rate plus the lead:
+`MeltyDrive` reads spin power as a target speed and pushes toward it with the
+rolling command for the measured spin rate plus a lead:
 
-    spin_cmd = min(spin_power, roll_volts * spin_rate / battery + spin_lead)
+    rolling command = volts_per_rad_s * spin_rate / battery
+    target speed    = spin_power * battery / volts_per_rad_s
+    spin_power_sent        = rolling command + spin_push      while below the target
 
-- At a steady spin the limit sits above `spin_power` and does nothing.
-- The wheel can never be asked to outrun the floor by more than the lead,
-  about 2 m/s at 0.05. That holds on spin-up, after a hit, in a pin, and when
+- The full lead is kept until the body is within `spin_push_fade_rad_s` (5 rad/s) of the
+  target, then fades to nothing at the target, where `spin_power_sent` is `spin_power`
+  again. While the body is below target `spin_power_sent` sits above `spin_power`, by
+  up to the lead. At or above the target it is `spin_power`.
+- The wheel is never asked to outrun the floor by more than the lead, about
+  3 m/s at 0.07. That holds on spin-up, after a hit, in a pin, and when
   restarting while still turning. The full-power switch is limited too.
+- A spin power at or below the lead is applied directly.
+- `volts_per_rad_s` now sets the speed each spin power means. If it is set too high
+  the push stops short of the real steady speed and the last part creeps; too
+  low and the robot settles faster than spin power alone would hold, with the
+  command sitting above spin power.
 - A direction change brakes with the wheels just below rolling speed, carries
   the body through zero at the lead alone, and reports the new direction
   (`turning_reversed`, which the heading estimator uses) once the body is
   under 10 rad/s.
 - There is no fallback if the spin rate is wrong. No accelerometer dropout or
-  stuck reading shows in any of the eleven logs so far. A spin rate stuck at
+  stuck reading shows in any of the eleven logs checked. A spin rate stuck at
   zero would hold the robot at the lead.
 - The translation waveform is applied to the limited command afterwards.
 
-Logged: `spin_power`, `spin_cmd`, `spin_roll`, `spin_flip`. Tunable from the
-viewer: `spin_lead`, `roll_volts`. To check the tuning in a log,
-compare `foo_rpm / 51` and `bar_rpm / 51` with `est_omega` during a spin-up:
-the wheel line should sit 5 to 15 % above the body line. Raise `spin_lead`
-until it starts to pull away.
+Logged: `spin_power`, `spin_power_sent`, `spin_power_rolling`, `spin_target_rad_s`, `spin_reversing`, and
+ten times a second the tunables `spin_push`, `volts_per_rad_s`, `spin_push_fade_rad_s`. All
+three are tunable from the viewer and return to the sketch values on boot.
+
+To check the tuning in a log:
+
+- `volts_per_rad_s`: hold a steady cruise, then `spin_power_sent * vin / est_omega`.
+- `spin_push`: compare `foo_rpm / 51` and `bar_rpm / 51` with `est_omega`
+  during a full-power spin-up. The wheel line should sit 10 to 15 % above the
+  body line. More than that is slip for no extra push.
 
 ### Open
 
-- The slip limit has been checked against a model built from these numbers,
-  not yet on the robot.
+- The speed-target version has been checked against a model, not yet on the
+  robot. A hit and a pin have not been tried on the robot with any version.
+- Direction-change braking is about half as hard as the lead should give. The
+  ESCs brake weakly when the command is only just below rolling speed.
 - ESC braking at zero command. On a stop from cruise the bar wheel drops to
   about a fifth of rolling speed and the body takes 4 to 5 s to stop. The foo
   wheel has reported 0 rpm during stops since the 20:53 log; in the 19:58 log
   both wheels reported and stops took 2 to 2.6 s. The AM32 brake settings need
   a second look.
+
+## Translation waveform (2026-10-10)
+
+The waveform pushes one wheel harder and eases the other for half of each
+turn: push side spin power plus 3 parts, ease side minus 1 part, each part
+`spin_power_sent * stick / 2`.
+
+Measured in the 00:54 log, 7 s of holding the stick at cruise:
+
+- The spin rate climbed from 77 to 96 rad/s, because the average power rises
+  with the stick.
+- The motor powers alternated between 0.12 and 0.35. At the higher spin rate
+  that is about 0.11 above and below the rolling power. The spin-up tests put
+  the limit of grip at about 0.07.
+- Each wheel swung between 0.83 and 1.21 of rolling speed and slid 8.6 m of
+  tread, 1.2 m per second. A whole spin-up slides about 2.3 m.
+
+Tried and taken out the same night: an equal-and-opposite waveform, spin power
+plus and minus `0.07 * stick`, which holds the spin rate steady and keeps the
+wheels within their grip. It did not feel right to drive, so the original
+3-to-1 waveform is back. `throttle` (the stick) is still logged so a recording
+shows when the robot was translating.
+
+Ideas for another day: the symmetric swing with a larger size, pushing only
+within about 60 degrees of the drive direction (keeps about 87 % of the drive
+for two thirds of the slip), and advancing the switch angle with spin rate.

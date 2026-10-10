@@ -62,6 +62,8 @@ void setup() {
   drive.led_offset_cw = 2.22;   // rad
   drive.led_offset_ccw = 4.02;  // rad
   drive.turn_speed = 1.1;       // rev/s
+  drive.arcade_power = 0.2;     // top speed in arcade (tank) mode, 0..1
+  drive.arcade_deadband = 0.1;  // stick travel ignored in arcade mode
 
   // The estimator learns the radius and the mag circle center while spinning
   // and the accel offset while parked, so the radius only shapes the first
@@ -72,16 +74,23 @@ void setup() {
   heading.B_NOM = 19.7;  // uT
   heading.begin();
 
-  // Slip limit, live-tunable from the viewer page. The spin command is held to the command
-  // that rolls the wheels at the body's spin rate plus a lead (see MeltyDrive.h). Measured on
-  // this robot, 2026-10-09: a steady spin takes 0.0447 motor volts per rad/s, and a lead of
-  // 0.05 pushes the body at about 20 rad/s2 with the wheels 5 to 10 % above rolling speed.
-  //   spin_lead   raise for a harder push, until the wheel speed starts leaving the body speed
-  //   roll_volts  steady spin: spin_cmd x vin / est_omega. Only needs changing with the motors
-  drive.roll_volts = 0.0447;
-  drive.spin_lead = 0.05;
-  Telemetry.tune("spin_lead", &drive.spin_lead);
-  Telemetry.tune("roll_volts", &drive.roll_volts);
+  // Slip limit, live-tunable from the viewer page. The motors get the power that rolls the
+  // wheels at the body's spin rate plus a push, until the body reaches the speed that spin
+  // power holds (see MeltyDrive.h). Measured on this robot once it was balanced, 2026-10-09:
+  // a steady spin takes 0.0405 motor volts per rad/s, and a push of 0.07 accelerates the
+  // body at about 25 rad/s2. More push only slid the tread.
+  //   volts_per_rad_s       steady spin: spin_power_sent x vin / est_omega. Sets the speed
+  //                         each spin power means
+  //   spin_push             power added above rolling. Past the knee the wheel speed leaves
+  //                         the body speed for no gain
+  //   spin_push_fade_rad_s  how far below the target speed the push starts to fade. Smaller
+  //                         pushes harder to the end
+  drive.volts_per_rad_s = 0.0405;
+  drive.spin_push = 0.07;
+  drive.spin_push_fade_rad_s = 5;
+  Telemetry.tune("spin_push", &drive.spin_push);
+  Telemetry.tune("volts_per_rad_s", &drive.volts_per_rad_s);
+  Telemetry.tune("spin_push_fade_rad_s", &drive.spin_push_fade_rad_s);
 }
 
 void loop() {
@@ -148,6 +157,7 @@ void readController() {
   if (right_ud.is(UP) || right_ud.is(DOWN)) drive.spin_power = 0;
   else if (right_lr.is(DOWN) || right_lr.movedFrom(UP)) drive.spin_power = 0.18;  // cruise
   else if (right_lr.is(UP)) drive.spin_power = 1;                                 // to get going, out of pins, or hit harder
+  drive.spin_unlimited = right_lr.is(UP);  // and straight to the motors, no slip limit
 
   drive.reversed = direction_switch.is(UP);
 
@@ -174,9 +184,11 @@ void logTelemetry() {
   Telemetry.add("drive_mode", drive.mode);
   Telemetry.add("heading", drive.angle * RAD_TO_DEG);  // what the LED arc and steering use
   Telemetry.add("spin_power", drive.spin_power);       // 0..1, what the controller asks for
-  Telemetry.add("spin_cmd", drive.spin_cmd);           // 0..1, after the slip limit
-  Telemetry.add("spin_roll", drive.spin_roll);         // 0..1, the command that rolls the wheels at the body's spin rate
-  Telemetry.add("spin_flip", drive.flip_phase);        // direction change: 0 none, 1 braking, 2 crossing zero
+  Telemetry.add("spin_power_sent", drive.spin_power_sent);        // 0..1, what the motors get after the slip limit
+  Telemetry.add("spin_power_rolling", drive.spin_power_rolling);  // 0..1, the power that just rolls the wheels at the body's spin rate
+  Telemetry.add("spin_target_rad_s", drive.spin_target_rad_s);    // the spin rate this spin power holds: where the push ends
+  Telemetry.add("spin_reversing", drive.spin_reversing);          // direction change: 0 none, 1 braking, 2 crossing zero
+  Telemetry.add("throttle", drive.throttle);           // -1..1, the translation stick
   Telemetry.add("motor_foo", drive.motor_foo);         // -1..1
   Telemetry.add("motor_bar", drive.motor_bar);
   Telemetry.add("spin_rpm", heading.w * 60 / TWO_PI);  // the robot's spin, signed (est_omega is the same in rad/s)
@@ -199,8 +211,9 @@ void logTelemetry() {
   static uint32_t last_slow_ms = 0;  // tunables, battery and ESC health, 10 times a second
   if (millis() - last_slow_ms >= 100) {
     last_slow_ms = millis();
-    Telemetry.add("spin_lead", drive.spin_lead);    // the slip limit's tunables, so a recording shows
-    Telemetry.add("roll_volts", drive.roll_volts);  // what was in force when it was taken
+    Telemetry.add("spin_push", drive.spin_push);  // the slip limit's tunables, so a recording
+    Telemetry.add("volts_per_rad_s", drive.volts_per_rad_s);  // shows what was in force
+    Telemetry.add("spin_push_fade_rad_s", drive.spin_push_fade_rad_s);
     Telemetry.add("vin", board.vin);
     Telemetry.add("foo_temp_c", board.foo.temperatureC());  // NAN until the ESC sends EDT
     Telemetry.add("foo_volts", board.foo.voltage());
