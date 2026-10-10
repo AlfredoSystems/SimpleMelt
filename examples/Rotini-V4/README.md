@@ -115,3 +115,83 @@ Capture the USB serial stream to a file, then for each stage take the Z median,
 count samples more than 250 counts (1.5 uT) above it, and bin those by
 milliseconds since the last `T` line. 800 uT full scale over 2^18 counts is
 0.0061 uT per count.
+
+## Slip limit (2026-10-09)
+
+### Symptom
+
+Tread wear. A step in spin power puts the wheels at their commanded speed in
+about 0.1 s, the body takes seconds to catch up, and the tread slides the
+whole time.
+
+### Measurements
+
+From telemetry logs on the shop floor. Wheel diameter 41 mm, spin axis to tyre
+contact 109.5 mm. "Tread slid" is the distance the tread slid across the floor
+per wheel: wheel surface speed minus rolling speed, added up over the event.
+
+- Rolling: 51 wheel rpm per rad/s of body spin. Geometry and logs agree.
+- No-load wheel speed: about 20,000 rpm per unit of command at 17 V. The
+  660 KV in the ESC config is not what the motor does.
+- Steady spin: `spin_cmd * vin / est_omega` = 0.0447 V per rad/s (0.043 to
+  0.048 between 35 and 85 rad/s). This is `roll_volts`.
+- Accelerating with grip: `volts = 0.0447 * omega + 0.0408 * alpha`. A command
+  0.05 above the rolling command gives about 20 rad/s2 with the wheels 5 to
+  10 % above rolling speed. This is `spin_lead`.
+- Grip: the body accelerates at 20 to 27 rad/s2 whether the wheels grip or
+  slide at 1 to 10 m/s. Only a full-power burnout, 35 to 40 m/s of slip, gives
+  more: 35 to 43 rad/s2.
+
+Spin-up from rest, time and tread slid:
+
+| | Cruise 0.18, to 50 rad/s | Full power, to 60 rad/s |
+|---|---|---|
+| Step | 2.1 s, 7.0 m | 1.6 s, 55 m |
+| Timed ramp, 0.15 per second | 2.7 s, 5.7 m | 2.9 s, 14 m |
+| Timed ramp, 0.05 per second | 3.8 s, 1.7 m | 4.1 s, 2.2 m |
+
+The 0.05 ramp loses about a second at the start: a gripping wheel runs about
+0.04 of command below its no-load speed, so a ramp from zero spends its first
+0.8 s building that lead before the wheel pushes at all.
+
+Hits (seven in the logs): the body drops to 12 to 17 rad/s, the wheels stay at
+cruise speed at about three times rolling, and it takes 2.5 to 3.9 s to get
+back to 80 % speed. 6 to 14 m of tread per hit at cruise, 36 m for the one hit
+at full power. A timed ramp cannot see a hit or a pin, and it blunts the
+full-power switch (16 s from cruise to full at 0.05 per second).
+
+### What the firmware does
+
+`MeltyDrive` holds the spin command to the rolling command for the measured
+spin rate plus the lead:
+
+    spin_cmd = min(spin_power, roll_volts * spin_rate / battery + spin_lead)
+
+- At a steady spin the limit sits above `spin_power` and does nothing.
+- The wheel can never be asked to outrun the floor by more than the lead,
+  about 2 m/s at 0.05. That holds on spin-up, after a hit, in a pin, and when
+  restarting while still turning. The full-power switch is limited too.
+- A direction change brakes with the wheels just below rolling speed, carries
+  the body through zero at the lead alone, and reports the new direction
+  (`turning_reversed`, which the heading estimator uses) once the body is
+  under 10 rad/s.
+- There is no fallback if the spin rate is wrong. No accelerometer dropout or
+  stuck reading shows in any of the eleven logs so far. A spin rate stuck at
+  zero would hold the robot at the lead.
+- The translation waveform is applied to the limited command afterwards.
+
+Logged: `spin_power`, `spin_cmd`, `spin_roll`, `spin_flip`. Tunable from the
+viewer: `spin_lead`, `roll_volts`. To check the tuning in a log,
+compare `foo_rpm / 51` and `bar_rpm / 51` with `est_omega` during a spin-up:
+the wheel line should sit 5 to 15 % above the body line. Raise `spin_lead`
+until it starts to pull away.
+
+### Open
+
+- The slip limit has been checked against a model built from these numbers,
+  not yet on the robot.
+- ESC braking at zero command. On a stop from cruise the bar wheel drops to
+  about a fifth of rolling speed and the body takes 4 to 5 s to stop. The foo
+  wheel has reported 0 rpm during stops since the 20:53 log; in the 19:58 log
+  both wheels reported and stops took 2 to 2.6 s. The AM32 brake settings need
+  a second look.

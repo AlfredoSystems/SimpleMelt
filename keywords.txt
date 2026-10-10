@@ -8,8 +8,6 @@
 
 MeltyDrive	KEYWORD1
 HeadingEstimator	KEYWORD1
-Button	KEYWORD1
-RotiniV4	KEYWORD1
 DriveMode	KEYWORD1
 
 #######################################
@@ -18,12 +16,6 @@ DriveMode	KEYWORD1
 
 update	KEYWORD2
 begin	KEYWORD2
-setMotors	KEYWORD2
-setLeds	KEYWORD2
-printStatus	KEYWORD2
-is_held	KEYWORD2
-just_pressed	KEYWORD2
-just_released	KEYWORD2
 wrapPi	KEYWORD2
 wrap2Pi	KEYWORD2
 

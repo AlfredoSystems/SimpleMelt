@@ -1,11 +1,14 @@
 /*
-  Rotini V4 - meltybrain firmware for the Rotini V4 board.
+  Rotini V3 - meltybrain firmware for the Rotini V3 board.
 
-  RotiniV4 (RotiniV4.h, next to this file) owns the hardware. The library
+  RotiniV3 (RotiniV3.h, next to this file) owns the hardware. The library
   does the rest: HeadingEstimator turns the sensors into a heading, MeltyDrive
   turns the sticks and that heading into motor powers. This sketch is the part
   that is yours to change: the controller mapping, the calibration numbers,
   and what gets logged.
+
+  The V3 runs OneShot125 ESCs (no telemetry back from them) and otherwise
+  the same loop as the Rotini V4 example.
 
   Controller: ExpressLRS over CRSF, mapped for a RadioMaster Zorro.
     left stick Y      throttle          right stick X   turn
@@ -18,14 +21,14 @@
 
   Telemetry: AlfredoTelemetry over ESP-NOW. Flash its Dongle example to a
   second ESP32, open extras/TelemetryViewer/index.html, and pair with "Rotini".
-  The channel list is in logTelemetry(). See README.md for bench notes.
+  The channel list is in logTelemetry().
 */
 
 #include <SimpleMelt.h>
 #include <AlfredoTelemetry.h>
-#include "RotiniV4.h"
+#include "RotiniV3.h"
 
-RotiniV4 board;
+RotiniV3 board;
 MeltyDrive drive;
 HeadingEstimator heading;
 
@@ -49,10 +52,7 @@ const CrsfSwitch::Position DOWN = CrsfSwitch::DOWN, MIDDLE = CrsfSwitch::MIDDLE,
 void setup() {
   Serial.begin(115200);
 
-  // Telemetry first, so a hardware problem can't keep the robot off the viewer.
-  // 200 frames/s and a 6 Mbps radio rate: about a tenth of the airtime, so the
-  // link keeps a multi-second buffer and the slower fallback rates stay available
-  // in a noisy arena.
+  // Telemetry first, so a hardware problem can't keep the robot off the viewer
   Telemetry.setMaxRate(200);
   Telemetry.setRadioRate(WIFI_PHY_RATE_6M);
   Telemetry.begin("Rotini");
@@ -62,26 +62,15 @@ void setup() {
   drive.led_offset_cw = 2.22;   // rad
   drive.led_offset_ccw = 4.02;  // rad
   drive.turn_speed = 1.1;       // rev/s
+  drive.spin_lead = 1;          // no slip limit: it has not been measured for this robot's motors
 
   // The estimator learns the radius and the mag circle center while spinning
-  // and the accel offset while parked, so the radius only shapes the first
-  // second and the other two start from zero (the 10-09 log fit the center
-  // near 11, 8 uT at zero current and the offset near 36 m/s2). B_NOM is the
-  // local horizontal Earth field.
-  heading.R0 = 0.117;    // m
+  // and the accel offset while parked. R0 is the V3's radius from the 1.x
+  // firmware (0.090 m + 0.032 m trim); B_NOM is the local horizontal Earth
+  // field (the V4's value; check est_mag_ok in a log of this robot).
+  heading.R0 = 0.122;    // m
   heading.B_NOM = 19.7;  // uT
   heading.begin();
-
-  // Slip limit, live-tunable from the viewer page. The spin command is held to the command
-  // that rolls the wheels at the body's spin rate plus a lead (see MeltyDrive.h). Measured on
-  // this robot, 2026-10-09: a steady spin takes 0.0447 motor volts per rad/s, and a lead of
-  // 0.05 pushes the body at about 20 rad/s2 with the wheels 5 to 10 % above rolling speed.
-  //   spin_lead   raise for a harder push, until the wheel speed starts leaving the body speed
-  //   roll_volts  steady spin: spin_cmd x vin / est_omega. Only needs changing with the motors
-  drive.roll_volts = 0.0447;
-  drive.spin_lead = 0.05;
-  Telemetry.tune("spin_lead", &drive.spin_lead);
-  Telemetry.tune("roll_volts", &drive.roll_volts);
 }
 
 void loop() {
@@ -94,21 +83,9 @@ void loop() {
   float dt = (now_us - last_us) * 1e-6f;
   last_us = now_us;
   if (dt > 0.5f) dt = 0;  // first loop, or a stall
-  // The direction the body is really turning, not the switch: after a direction change the
-  // drive brakes first and only then reports the new direction
-  int spin_dir = (drive.turning_reversed ? -1 : 1) * MAG_SPIN_SIGN;
+  int spin_dir = (drive.reversed ? -1 : 1) * MAG_SPIN_SIGN;
   bool motors_off = drive.motor_foo == 0 && drive.motor_bar == 0;
-  // What the wheels are doing, from the ESCs' rpm replies (fresh within 20 ms). The estimator learns
-  // the accel offset only with both wheels stopped, and the radius and compass center only with a
-  // wheel turning. No replies (USB power, ESCs off) = unknown, and nothing can spin anyway.
-  HeadingEstimator::Wheels wheels = HeadingEstimator::WHEELS_UNKNOWN;
-  if (board.foo.ageUs() < 20000 && board.bar.ageUs() < 20000)
-    wheels = (board.foo.rpm() > 0 || board.bar.rpm() > 0) ? HeadingEstimator::WHEELS_TURNING : HeadingEstimator::WHEELS_STOPPED;
-  heading.update(dt, board.accel_z, board.mag_fresh, board.mag_x, board.mag_y, board.mag_z, spin_dir, motors_off, wheels);
-
-  // Slip limit inputs: the body's spin rate and the battery voltage
-  drive.spin_rate = heading.w;
-  drive.battery = board.vin;
+  heading.update(dt, board.accel_z, board.mag_fresh, board.mag_x, board.mag_y, board.mag_z, spin_dir, motors_off);
 
   drive.heading = heading.theta;
   drive.update();
@@ -173,15 +150,8 @@ void logTelemetry() {
 
   Telemetry.add("drive_mode", drive.mode);
   Telemetry.add("heading", drive.angle * RAD_TO_DEG);  // what the LED arc and steering use
-  Telemetry.add("spin_power", drive.spin_power);       // 0..1, what the controller asks for
-  Telemetry.add("spin_cmd", drive.spin_cmd);           // 0..1, after the slip limit
-  Telemetry.add("spin_roll", drive.spin_roll);         // 0..1, the command that rolls the wheels at the body's spin rate
-  Telemetry.add("spin_flip", drive.flip_phase);        // direction change: 0 none, 1 braking, 2 crossing zero
   Telemetry.add("motor_foo", drive.motor_foo);         // -1..1
   Telemetry.add("motor_bar", drive.motor_bar);
-  Telemetry.add("spin_rpm", heading.w * 60 / TWO_PI);  // the robot's spin, signed (est_omega is the same in rad/s)
-  Telemetry.add("foo_rpm", board.foo.telemetryValid() ? board.foo.rpm() : NAN);  // a gap while the ESC isn't answering
-  Telemetry.add("bar_rpm", board.bar.telemetryValid() ? board.bar.rpm() : NAN);
 
   // Heading estimator internals: enough to replay the filter offline
   Telemetry.add("est_heading", heading.theta * RAD_TO_DEG);
@@ -192,22 +162,12 @@ void logTelemetry() {
   Telemetry.add("est_cu", heading.cu);                 // learned circle center, uT
   Telemetry.add("est_cv", heading.cv);
   Telemetry.add("est_a_off", heading.aOff);            // learned accel Z offset, m/s^2
-  Telemetry.add("est_b_flat", heading.bFlat);          // spin-axis field when flat, uT (NAN until seen)
-  Telemetry.add("est_parked", heading.parked);         // this loop counted as parked (offset learning on)
   Telemetry.add("est_mag_ok", heading.accepted);       // last fix passed gate 1
 
-  static uint32_t last_slow_ms = 0;  // tunables, battery and ESC health, 10 times a second
+  static uint32_t last_slow_ms = 0;  // battery, 10 times a second
   if (millis() - last_slow_ms >= 100) {
     last_slow_ms = millis();
-    Telemetry.add("spin_lead", drive.spin_lead);    // the slip limit's tunables, so a recording shows
-    Telemetry.add("roll_volts", drive.roll_volts);  // what was in force when it was taken
     Telemetry.add("vin", board.vin);
-    Telemetry.add("foo_temp_c", board.foo.temperatureC());  // NAN until the ESC sends EDT
-    Telemetry.add("foo_volts", board.foo.voltage());
-    Telemetry.add("foo_amps", board.foo.current());
-    Telemetry.add("bar_temp_c", board.bar.temperatureC());
-    Telemetry.add("bar_volts", board.bar.voltage());
-    Telemetry.add("bar_amps", board.bar.current());
   }
   Telemetry.send();
 }
