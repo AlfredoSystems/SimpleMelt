@@ -13,8 +13,7 @@
     switch F (SWD)    spin direction
     bumpers           spin power -2% / +2%
     right arrows      spin power: up or down 0%, left 18% (cruise), right 100%
-    switch C (SWB)    what the left arrows trim: mid = clockwise LED offset,
-                      up = counter-clockwise LED offset, back = nothing
+    left arrows       left / right trim the LED offset for the direction it is spinning
 
   Telemetry: AlfredoTelemetry over ESP-NOW. Flash its Dongle example to a
   second ESP32, open extras/TelemetryViewer/index.html, and pair with "Rotini".
@@ -33,16 +32,19 @@ HeadingEstimator heading;
 // -1 if it decreases. If the LED arc runs backwards after a direction change, flip this.
 const int MAG_SPIN_SIGN = 1;
 
+// The compass is used only while each motor's power is within this of the rolling power
+// (0..1). In the first fight log readings stayed clean up to about 0.1 and were useless past 0.4.
+const float MAG_QUIET_POWER = 0.1;
+
 // ---- controller: each is a channel at 1000 / 1500 / 2000 = DOWN / MIDDLE / UP ----
 CrsfSwitch mode_switch(6);        // switch B: DOWN stop, MIDDLE arcade, UP melty
 CrsfSwitch direction_switch(5);   // switch F: UP spins reversed
-CrsfSwitch trim_switch(12);       // switch C: which LED offset the left arrows trim
 CrsfSwitch bumpers(11);           // DOWN left bumper, UP right bumper
 CrsfSwitch left_lr(10);           // left arrows: DOWN left, UP right
 CrsfSwitch left_ud(9);            // left arrows: DOWN down, UP up
 CrsfSwitch right_lr(7);           // right arrows
 CrsfSwitch right_ud(8);
-CrsfSwitch *const switches[] = {&mode_switch, &direction_switch, &trim_switch, &bumpers,
+CrsfSwitch *const switches[] = {&mode_switch, &direction_switch, &bumpers,
                                 &left_lr, &left_ud, &right_lr, &right_ud};
 const CrsfSwitch::Position DOWN = CrsfSwitch::DOWN, MIDDLE = CrsfSwitch::MIDDLE, UP = CrsfSwitch::UP;
 
@@ -70,8 +72,16 @@ void setup() {
   // second and the other two start from zero (the 10-09 log fit the center
   // near 11, 8 uT at zero current and the offset near 36 m/s2). B_NOM is the
   // local horizontal Earth field.
-  heading.R0 = 0.117;    // m
-  heading.B_NOM = 19.7;  // uT
+  //
+  // From the first fight log (DashBash 2026-10-10): the radius is 0.122 m by the compass at a
+  // clean cruise, and the learner had walked it to 0.145 on compass fixes the motors had
+  // corrupted, so it is fixed here (N_R = 0). The arena floor's field ran from 18 to 55 uT
+  // from spot to spot, so the field-size gate is opened to 14..56 uT; MAG_QUIET_POWER in
+  // loop() is what keeps the motors' field out now.
+  heading.R0 = 0.122;      // m
+  heading.N_R = 0;         // never learn the radius
+  heading.B_NOM = 35;      // uT
+  heading.GATE_MAG = 0.6;  // fraction of B_NOM
   heading.begin();
 
   // Slip limit, live-tunable from the viewer page. The motors get the power that rolls the
@@ -113,7 +123,13 @@ void loop() {
   HeadingEstimator::Wheels wheels = HeadingEstimator::WHEELS_UNKNOWN;
   if (board.foo.ageUs() < 20000 && board.bar.ageUs() < 20000)
     wheels = (board.foo.rpm() > 0 || board.bar.rpm() > 0) ? HeadingEstimator::WHEELS_TURNING : HeadingEstimator::WHEELS_STOPPED;
-  heading.update(dt, board.accel_z, board.mag_fresh, board.mag_x, board.mag_y, board.mag_z, spin_dir, motors_off, wheels);
+  // Motor current puts a field on the magnetometer several times the Earth's, so a compass
+  // reading only counts while both motors are near the power that just rolls the wheels,
+  // where they draw almost nothing. Pushing harder than that the heading runs on the
+  // accelerometer and the compass pulls it back at the next coast.
+  bool mag_quiet = fabsf(fabsf(drive.motor_foo) - drive.spin_power_rolling) < MAG_QUIET_POWER &&
+                   fabsf(fabsf(drive.motor_bar) - drive.spin_power_rolling) < MAG_QUIET_POWER;
+  heading.update(dt, board.accel_z, board.mag_fresh && mag_quiet, board.mag_x, board.mag_y, board.mag_z, spin_dir, motors_off, wheels);
 
   // Slip limit inputs: the body's spin rate and the battery voltage
   drive.spin_rate = heading.w;
@@ -161,12 +177,10 @@ void readController() {
 
   drive.reversed = direction_switch.is(UP);
 
-  // Left arrows trim the LED offset for whichever direction switch C selects
-  float *offset = trim_switch.is(MIDDLE) ? &drive.led_offset_cw : trim_switch.is(UP) ? &drive.led_offset_ccw : nullptr;
-  if (offset) {
-    if (left_lr.movedTo(DOWN)) *offset += 0.1;  // rad, 5.7 degrees
-    if (left_lr.movedTo(UP)) *offset -= 0.1;
-  }
+  // Left arrows trim the LED offset for the direction the body is turning, the one in use
+  float &offset = drive.turning_reversed ? drive.led_offset_ccw : drive.led_offset_cw;
+  if (left_lr.movedTo(DOWN)) offset -= 0.1;  // rad, 5.7 degrees
+  if (left_lr.movedTo(UP)) offset += 0.1;
 }
 
 void logTelemetry() {
